@@ -1,0 +1,8 @@
+.env
+__pycache__/
+*.pyc
+course_monitor.log
+logs/
+*.db
+.claude/
+chromedriver-win64/chromedriver.exe
