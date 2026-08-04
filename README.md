@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # Course Auto-Register
 
 Automated course seat monitor and registration tool for Auburn University's TigerScheduler.
