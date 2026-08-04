@@ -1,0 +1,7 @@
+.env
+data/
+logs/
+__pycache__/
+.git/
+chromedriver-win64/
+*.log
