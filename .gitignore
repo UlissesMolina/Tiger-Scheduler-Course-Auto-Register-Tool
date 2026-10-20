@@ -5,4 +5,5 @@ course_monitor.log
 logs/
 *.db
 .claude/
-chromedriver-win64/chromedriver.exe
+chromedriver-win64/
+*.log

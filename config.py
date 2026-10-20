@@ -16,6 +16,8 @@ class Config:
         if c.strip()
     ]
     CHECK_INTERVAL = int(os.getenv("CHECK_INTERVAL", "60"))
+    # TigerSchedule term code, from the data-term attribute on the term picker
+    TERM_CODE = os.getenv("TERM_CODE", "202720")
 
     # Email notifications
     SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
@@ -37,6 +39,5 @@ class Config:
         "?service=https%3A%2F%2Ftigerschedule.auburn.edu%2Fvsb%2Fcriteria.jsp"
     )
 
-    # Timeouts
-    SESSION_TIMEOUT = 3600
-    LOGIN_CHECK_INTERVAL = 1800
+    # Seconds to wait for login to finish (includes approving Duo)
+    LOGIN_TIMEOUT = int(os.getenv("LOGIN_TIMEOUT", "180"))
