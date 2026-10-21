@@ -39,8 +39,8 @@ The tool uses Selenium to interact with TigerScheduler in a real browser session
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/courseAuto.git
-cd courseAuto
+git clone https://github.com/UlissesMolina/Tiger-Scheduler-Course-Auto-Register-Tool.git
+cd Tiger-Scheduler-Course-Auto-Register-Tool
 
 # Install dependencies
 pip install -r requirements.txt
@@ -103,6 +103,8 @@ All settings are managed via the `.env` file. CLI arguments override `.env` valu
 | `AUBURN_PASSWORD` | Auburn login password | — |
 | `COURSES` | Comma-separated course list | `ELEC 2200,MATH 2660` |
 | `CHECK_INTERVAL` | Seconds between checks | `60` |
+| `TERM_CODE` | TigerSchedule term code (`data-term` on the term picker) | `202720` |
+| `LOGIN_TIMEOUT` | Seconds to wait for login, including Duo approval | `180` |
 | `HEADLESS` | Run in headless mode | `false` |
 | `SMTP_HOST` | SMTP server host | `smtp.gmail.com` |
 | `SMTP_PORT` | SMTP server port | `587` |
@@ -115,7 +117,7 @@ All settings are managed via the `.env` file. CLI arguments override `.env` valu
 
 - **Python 3.11** — core language
 - **Selenium** — browser automation
-- **webdriver-manager** — automatic ChromeDriver management
+- **Selenium Manager** — automatic ChromeDriver management (built into Selenium)
 - **python-dotenv** — environment variable configuration
 - **SQLite** — check history persistence
 - **smtplib** — email notifications
@@ -124,24 +126,3 @@ All settings are managed via the `.env` file. CLI arguments override `.env` valu
 ## Disclaimer
 
 Use responsibly. Do not violate Auburn's terms of service or automate actions without permission. This project is for educational purposes only.
-=======
-# Tiger Scheduler Course Auto-Register Tool
-
-This Python script automatically checks for open seats in specific Auburn University courses on TigerScheduler and will attempt to register.
-
-## Features
-- Monitor course availability (refreshes every mintue)
-- Filter guven course
-- Auto-login and action
-
-## ⚠️ Disclaimer
-Use responsibly. Do not violate Auburn's terms of service or automate actions without permission. This project is for educational purposes only.
-
-## Setup
-- Python 3.x
-- `selenium`
-- Chrome + chromedriver
-
-## Usage
-Edit `script.py` to set your course preferences. Then run:
->>>>>>> 4af52312c372d73084011e3f01fb0537ccdc1f46
