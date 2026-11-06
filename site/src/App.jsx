@@ -1,13 +1,15 @@
 import { useDeferredValue, useEffect, useMemo, useState } from 'react'
 import CourseCard from './components/CourseCard.jsx'
 import Filters from './components/Filters.jsx'
+import MajorPicker from './components/MajorPicker.jsx'
 import WatchPanel from './components/WatchPanel.jsx'
 import { formatUpdated } from './lib/format.js'
-import { buildIndex, methods, searchCourses } from './lib/search.js'
+import { buildIndex, majorTagger, methods, searchCourses } from './lib/search.js'
 import { load, save } from './lib/storage.js'
 
 const PAGE = 40
 const NO_FILTERS = { openOnly: false, days: [], startAfter: '', endBefore: '', method: '' }
+const ALL_KINDS = { required: true, elective: true, core: true }
 
 async function getJson(url) {
   const res = await fetch(url)
@@ -17,7 +19,7 @@ async function getJson(url) {
 
 function readUrl() {
   const p = new URLSearchParams(location.search)
-  return { term: p.get('term') ?? '', q: p.get('q') ?? '' }
+  return { term: p.get('term') ?? '', q: p.get('q') ?? '', major: p.get('major') }
 }
 
 export default function App() {
@@ -34,9 +36,13 @@ export default function App() {
   const [query, setQuery] = useState(initial.q)
   const [filters, setFilters] = useState(NO_FILTERS)
   const [watched, setWatched] = useState(() => load('watched', []))
+  const [majorsDoc, setMajorsDoc] = useState(null)
+  // A shared link's major wins; otherwise remember the visitor's own.
+  const [majorId, setMajorId] = useState(() => initial.major ?? load('major', ''))
+  const [kinds, setKinds] = useState(ALL_KINDS)
   const deferredQuery = useDeferredValue(query)
   // "Show more" depth resets whenever the search, filters or term change.
-  const pageKey = `${term}|${deferredQuery}|${JSON.stringify(filters)}`
+  const pageKey = `${term}|${deferredQuery}|${JSON.stringify(filters)}|${majorId}|${JSON.stringify(kinds)}`
   const [page, setPage] = useState({ key: '', limit: PAGE })
   const limit = page.key === pageKey ? page.limit : PAGE
 
@@ -44,6 +50,8 @@ export default function App() {
     getJson('./data/terms.json')
       .then(({ terms }) => setTerms(terms))
       .catch((e) => setListError(`Could not load the term list (${e.message}).`))
+    // The major filter is optional; the site works without it.
+    getJson('./data/majors.json').then(setMajorsDoc).catch(() => {})
   }, [])
 
   useEffect(() => {
@@ -60,10 +68,12 @@ export default function App() {
     const p = new URLSearchParams()
     if (term) p.set('term', term)
     if (query.trim()) p.set('q', query.trim())
+    if (majorId) p.set('major', majorId)
     history.replaceState(null, '', `${location.pathname}${p.size ? `?${p}` : ''}`)
-  }, [term, query])
+  }, [term, query, majorId])
 
   useEffect(() => save('watched', watched), [watched])
+  useEffect(() => save('major', majorId), [majorId])
 
   // Cards rise in on the first load only; after that, typing a search swaps
   // results instantly instead of replaying the entrance.
@@ -77,11 +87,15 @@ export default function App() {
 
   const index = useMemo(() => (doc ? buildIndex(doc.sections) : []), [doc])
   const methodList = useMemo(() => (doc ? methods(doc.sections) : []), [doc])
-  const courses = useMemo(() => searchCourses(index, deferredQuery, filters), [index, deferredQuery, filters])
+  const majors = majorsDoc?.majors ?? []
+  const major = majors.find((m) => m.id === majorId) ?? null
+  const tagger = useMemo(() => majorTagger(major, majorsDoc?.core ?? {}, kinds), [major, majorsDoc, kinds])
+  const courses = useMemo(() => searchCourses(index, deferredQuery, filters, tagger), [index, deferredQuery, filters, tagger])
   const sectionCount = useMemo(() => courses.reduce((n, c) => n + c.sections.length, 0), [courses])
 
   const toggleWatch = (code) =>
     setWatched((w) => (w.includes(code) ? w.filter((c) => c !== code) : [...w, code]))
+  const toggleKind = (kind) => setKinds((k) => ({ ...k, [kind]: !k[kind] }))
   const filtersActive = JSON.stringify(filters) !== JSON.stringify(NO_FILTERS)
 
   return (
@@ -105,6 +119,7 @@ export default function App() {
             {terms.map((t) => <option key={t.code} value={t.code}>{t.description}</option>)}
           </select>
         </div>
+        <MajorPicker majors={majors} majorId={major ? majorId : ''} onMajor={setMajorId} kinds={kinds} onToggleKind={toggleKind} />
         <Filters filters={filters} onChange={setFilters} methods={methodList} />
       </header>
 

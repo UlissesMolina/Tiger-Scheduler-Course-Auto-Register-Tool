@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { formatInstructor, formatMeeting, formatTime } from './format.js'
-import { buildIndex, passesFilters, searchCourses } from './search.js'
+import { buildIndex, majorTagger, passesFilters, searchCourses } from './search.js'
 
 const section = (over) => ({
   crn: '10001', subject: 'COMP', number: '1210', section: '001', title: 'Fundamentals of Computing I',
@@ -31,6 +31,26 @@ test('course code queries match by prefix, with or without a space', () => {
 test('code matches rank ahead of title matches', () => {
   const extra = buildIndex([...SECTIONS, section({ crn: '10005', subject: 'AERO', number: '7140', title: 'Advanced Computational Fluid Dynamics' })])
   assert.deepEqual(searchCourses(extra, 'comp', NONE).map((c) => c.code), ['COMP 1210', 'COMP 2210', 'AERO 7140'])
+})
+
+test('major filter tags required, elective and core courses and orders them', () => {
+  const sections = [
+    section({ crn: '1', subject: 'COMP', number: '2210' }),
+    section({ crn: '2', subject: 'COMP', number: '1210' }),
+    section({ crn: '3', subject: 'COMP', number: '4320' }),
+    section({ crn: '4', subject: 'COMP', number: '7970' }),
+    section({ crn: '5', subject: 'HIST', number: '1010' }),
+    section({ crn: '6', subject: 'ARTS', number: '1510' }),
+  ]
+  const major = { required: { 'COMP 1210': 'Freshman', 'COMP 2210': 'Sophomore' }, subjects: ['COMP'], coreAreas: ['History'] }
+  const core = { History: ['HIST 1010'], 'Fine Arts': ['ARTS 1510'] }
+  const all = { required: true, elective: true, core: true }
+  const run = (kinds) => searchCourses(buildIndex(sections), '', NONE, majorTagger(major, core, kinds))
+  const result = run(all)
+  assert.deepEqual(result.map((c) => c.code), ['COMP 1210', 'COMP 2210', 'COMP 4320', 'HIST 1010'])
+  assert.deepEqual(result.map((c) => c.tag.label), ['Required · Freshman', 'Required · Sophomore', 'Possible elective', 'Core · History'])
+  assert.deepEqual(run({ ...all, required: false }).map((c) => c.code), ['COMP 4320', 'HIST 1010'])
+  assert.equal(majorTagger(null, core, all), null)
 })
 
 test('words match title, instructor and CRN', () => {

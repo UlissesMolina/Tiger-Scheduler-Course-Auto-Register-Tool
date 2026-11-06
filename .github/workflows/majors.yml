@@ -1,0 +1,54 @@
+name: Majors snapshot
+
+# Every major's curriculum and the Core curriculum from Auburn's bulletin, for
+# the site's major filter. The bulletin changes about once a year, so weekly
+# is plenty; dispatch by hand when the new bulletin is published.
+on:
+  schedule:
+    - cron: '50 10 * * 1'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Write even when far fewer majors come back than are committed'
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: majors
+  cancel-in-progress: false
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Fetch majors
+        env:
+          FORCE_WRITE: ${{ inputs.force && '1' || '' }}
+        run: python scripts/fetch_majors.py
+
+      # Majors that did parse are already written, so commit before a failure
+      # elsewhere turns the job red.
+      - name: Commit if changed
+        if: ${{ !cancelled() }}
+        run: |
+          if [ -z "$(git status --porcelain -- data/majors.json)" ]; then
+            echo "No change in data/majors.json, nothing to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/majors.json
+          git commit -m "Update majors snapshot"
+          git pull --rebase origin ${{ github.ref_name }}
+          git push origin HEAD:${{ github.ref_name }}

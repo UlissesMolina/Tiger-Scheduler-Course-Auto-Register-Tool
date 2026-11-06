@@ -72,6 +72,7 @@ export default function CourseCard({ course, index = 0, watched, onToggleWatch }
         <div>
           <h2>
             <span className="code">{course.code}</span> {course.title}
+            {course.tag && <span className={`tag ${course.tag.kind}`}>{course.tag.label}</span>}
           </h2>
           <p className="muted">
             {formatCredits(course.credits)} · {course.sections.length} section{course.sections.length === 1 ? '' : 's'} ·{' '}

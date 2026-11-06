@@ -51,16 +51,55 @@ export function passesFilters(section, filters) {
   return true
 }
 
+export const YEAR_ORDER = ['Freshman', 'Sophomore', 'Junior', 'Senior', 'Fifth Year']
+const KIND_ORDER = { required: 0, elective: 1, core: 2 }
+
+/**
+ * For a major from majors.json, a function from course to how it counts:
+ * required (with the year the plan puts it in), a possible elective (an
+ * undergraduate 3000-5999 course in the major's own subjects), or Core (in a
+ * Core area the plan leaves open). Courses that do none of these get null.
+ * `kinds` switches each of the three on or off.
+ */
+export function majorTagger(major, core, kinds) {
+  if (!major) return null
+  const coreArea = new Map()
+  for (const area of major.coreAreas) for (const code of core[area] ?? []) if (!coreArea.has(code)) coreArea.set(code, area)
+  return (code, subject, number) => {
+    if (code in major.required) {
+      if (!kinds.required) return null
+      const year = major.required[code]
+      return { kind: 'required', label: year ? `Required · ${year}` : 'Required', year }
+    }
+    if (kinds.elective && major.subjects.includes(subject) && number >= '3000' && number < '6000') {
+      return { kind: 'elective', label: 'Possible elective' }
+    }
+    if (kinds.core && coreArea.has(code)) return { kind: 'core', label: `Core · ${coreArea.get(code)}` }
+    return null
+  }
+}
+
+function tagRank(tag) {
+  if (!tag) return [9, 9]
+  const year = YEAR_ORDER.indexOf(tag.year)
+  return [KIND_ORDER[tag.kind], year === -1 ? 8 : year]
+}
+
 /** Group matching sections into courses, sorted by subject then number. */
-export function searchCourses(index, query, filters) {
+export function searchCourses(index, query, filters, tagger = null) {
   const match = makeMatcher(query)
   const courses = new Map()
+  const tags = new Map()
   for (const { section, text } of index) {
-    if (!match(section, text) || !passesFilters(section, filters)) continue
     const key = courseCode(section)
+    if (tagger) {
+      if (!tags.has(key)) tags.set(key, tagger(key, section.subject, section.number))
+      if (!tags.get(key)) continue
+    }
+    if (!match(section, text) || !passesFilters(section, filters)) continue
     let course = courses.get(key)
     if (!course) {
-      course = { code: key, subject: section.subject, number: section.number, title: section.title, credits: section.credits, sections: [], available: 0, capacity: 0 }
+      course = { code: key, subject: section.subject, number: section.number, title: section.title, credits: section.credits, sections: [], available: 0, capacity: 0, tag: tags.get(key) ?? null }
       courses.set(key, course)
     }
     course.sections.push(section)
@@ -71,8 +110,15 @@ export function searchCourses(index, query, filters) {
   // are what was asked for, so code matches come first.
   const code = query.trim().toLowerCase().match(CODE_QUERY)
   const isCodeMatch = (c) => (code && c.subject.toLowerCase() === code[1] && c.number.startsWith(code[2]) ? 0 : 1)
+  // With a major chosen, its required courses come first in plan order (year by year).
+  const byTag = (a, b) => {
+    if (!tagger) return 0
+    const [ka, ya] = tagRank(a.tag)
+    const [kb, yb] = tagRank(b.tag)
+    return ka - kb || ya - yb
+  }
   return [...courses.values()].sort((a, b) =>
-    isCodeMatch(a) - isCodeMatch(b) || a.subject.localeCompare(b.subject) || a.number.localeCompare(b.number))
+    isCodeMatch(a) - isCodeMatch(b) || byTag(a, b) || a.subject.localeCompare(b.subject) || a.number.localeCompare(b.number))
 }
 
 export function buildIndex(sections) {
