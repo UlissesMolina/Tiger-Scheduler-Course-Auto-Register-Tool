@@ -1,0 +1,68 @@
+name: Seat watcher
+
+# Alerts (ntfy) when a watched section opens; you register yourself. It reads
+# the public class search and never logs in, so it needs no Auburn credentials.
+#
+# Setup, once: Settings > Secrets and variables > Actions
+#   secret   NTFY_TOPIC   your ntfy topic (kept out of the logs)
+#   variable COURSES      e.g. "COMP 5700,COMP 5120" (the site's Copy .env line, without COURSES=)
+#   optional variables: WATCH_CRNS, TERM_CODE, WATCH_UNTIL (YYYY-MM-DD), QUIET_HOURS (e.g. 23-7)
+# The job does nothing while COURSES is unset; disable this workflow to pause it.
+#
+# Every 10 minutes, 7am-11pm Auburn time. Cron is UTC and does not follow
+# daylight saving, so it covers both offsets and watch.py trims to QUIET_HOURS.
+on:
+  schedule:
+    - cron: '3-59/10 0-4,12-23 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: seat-watcher
+  cancel-in-progress: false
+
+jobs:
+  check:
+    if: ${{ vars.COURSES != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      TZ: America/Chicago
+      COURSES: ${{ vars.COURSES }}
+      WATCH_CRNS: ${{ vars.WATCH_CRNS }}
+      TERM_CODE: ${{ vars.TERM_CODE }}
+      WATCH_UNTIL: ${{ vars.WATCH_UNTIL }}
+      QUIET_HOURS: ${{ vars.QUIET_HOURS || '23-7' }}
+      NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+      WATCH_STATE: .watch/state.json
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      # Only python-dotenv; the watcher does not need Selenium.
+      - run: pip install python-dotenv
+
+      # Seats from the last run, so each opening alerts once. Every run saves
+      # under a new key and restores the newest by prefix.
+      - name: Restore last check
+        uses: actions/cache/restore@v4
+        with:
+          path: .watch
+          key: watch-state-${{ github.run_id }}
+          restore-keys: watch-state-
+
+      - name: Check seats
+        run: python watch.py --check
+
+      # Saved even when the check failed, so the failure count carries over.
+      - name: Save this check
+        if: ${{ !cancelled() }}
+        uses: actions/cache/save@v4
+        with:
+          path: .watch
+          key: watch-state-${{ github.run_id }}

@@ -17,7 +17,8 @@ class Config:
     ]
     CHECK_INTERVAL = int(os.getenv("CHECK_INTERVAL", "60"))
     # TigerSchedule term code, from the data-term attribute on the term picker
-    TERM_CODE = os.getenv("TERM_CODE", "202720")
+    # "or": a blank value (an unset GitHub Actions variable) still gets the default
+    TERM_CODE = os.getenv("TERM_CODE") or "202720"
 
     # Email notifications
     SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
@@ -37,6 +38,8 @@ class Config:
     WATCH_UNTIL = os.getenv("WATCH_UNTIL", "")
     NTFY_TOPIC = os.getenv("NTFY_TOPIC", "")
     NTFY_SERVER = os.getenv("NTFY_SERVER", "https://ntfy.sh")
+    # Where --check keeps seats from the last run, so each opening alerts once
+    WATCH_STATE = os.getenv("WATCH_STATE") or "logs/watch-state.json"
 
     # Browser settings
     HEADLESS = os.getenv("HEADLESS", "false").lower() == "true"

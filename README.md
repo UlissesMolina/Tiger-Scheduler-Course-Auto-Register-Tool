@@ -99,6 +99,20 @@ It reads `COURSES` and `TERM_CODE` from `.env`. Use the site's **Watch** button 
 | `WATCH_UNTIL` | Last day to watch (`YYYY-MM-DD`) | 21 days from start |
 | `NTFY_TOPIC` | ntfy topic for phone alerts | — |
 
+The first check sends one "Seat watcher started" alert listing what's open now, which also confirms alerts reach you. After that you only hear about sections that open.
+
+### Run it on GitHub instead of your laptop
+
+The [Seat watcher](.github/workflows/watch.yml) workflow runs `watch.py --check` every 10 minutes from 7am to 11pm Auburn time on GitHub's servers, so it keeps going while your laptop is off. `--check` does one check and exits; the seats from the last run are kept in the Actions cache so each opening still alerts once.
+
+1. Repo **Settings → Secrets and variables → Actions**
+2. **Secrets** tab: add `NTFY_TOPIC` with your ntfy topic (secrets are hidden in logs)
+3. **Variables** tab: add `COURSES`, e.g. `COMP 5700,COMP 5120` (the site's **Copy .env line**, without `COURSES=`)
+4. Optional variables: `WATCH_CRNS`, `TERM_CODE`, `WATCH_UNTIL`, `QUIET_HOURS`
+5. **Actions → Seat watcher → Run workflow** to check right away
+
+Change what you watch by editing the `COURSES` variable, which works from your phone too. The job does nothing while `COURSES` is unset; to pause it, disable the workflow. Scheduled runs can start a few minutes late when GitHub is busy, which is fine at this pace. The repo is public, so run logs (including which courses you watch) are public; the ntfy topic is not.
+
 ## Auto-Register
 
 ### How It Works
