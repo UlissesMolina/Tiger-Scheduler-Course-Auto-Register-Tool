@@ -1,6 +1,7 @@
 import { useState } from 'react'
+import Icon from './Icon.jsx'
 
-/** The watch list, exported as the COURSES= line the auto-register tool reads from .env. */
+/** Floating dock with the watch list, exported as the COURSES= line the seat watcher reads from .env. */
 export default function WatchPanel({ watched, onRemove }) {
   const [copied, setCopied] = useState(false)
   if (!watched.length) return null
@@ -12,24 +13,25 @@ export default function WatchPanel({ watched, onRemove }) {
       setCopied(true)
       setTimeout(() => setCopied(false), 1500)
     } catch {
-      // clipboard blocked; the line is selectable
+      // clipboard blocked; the line is in the button's title
     }
   }
 
   return (
-    <aside className="watch-panel" aria-label="Watched courses">
-      <div className="watch-list">
-        <strong>Watching</strong>
+    <aside className="watch-dock" aria-label="Watched courses">
+      <span className="dock-label"><Icon name="star" size={15} filled /><span>Watching</span></span>
+      <div className="dock-list">
         {watched.map((code) => (
-          <button key={code} type="button" className="chip on" onClick={() => onRemove(code)} title="Stop watching">
-            {code} ✕
+          <button key={code} type="button" className="dock-chip" onClick={() => onRemove(code)} title={`Stop watching ${code}`}>
+            {code}
+            <Icon name="x" size={12} />
           </button>
         ))}
       </div>
-      <div className="env-line">
-        <code>{line}</code>
-        <button type="button" onClick={copy}>{copied ? 'Copied' : 'Copy for .env'}</button>
-      </div>
+      <button type="button" className="dock-copy" onClick={copy} title={line}>
+        <Icon name={copied ? 'check' : 'copy'} size={14} />
+        {copied ? 'Copied' : 'Copy .env'}
+      </button>
     </aside>
   )
 }

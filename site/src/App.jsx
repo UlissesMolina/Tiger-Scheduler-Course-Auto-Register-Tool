@@ -1,10 +1,11 @@
-import { useDeferredValue, useEffect, useMemo, useState } from 'react'
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import CourseCard from './components/CourseCard.jsx'
 import Filters from './components/Filters.jsx'
+import Icon from './components/Icon.jsx'
 import MajorPicker from './components/MajorPicker.jsx'
 import WatchPanel from './components/WatchPanel.jsx'
 import { formatUpdated } from './lib/format.js'
-import { buildIndex, majorTagger, methods, searchCourses } from './lib/search.js'
+import { activeFilterCount, buildIndex, majorTagger, methods, searchCourses } from './lib/search.js'
 import { load, save } from './lib/storage.js'
 
 const PAGE = 40
@@ -96,67 +97,139 @@ export default function App() {
   const toggleWatch = (code) =>
     setWatched((w) => (w.includes(code) ? w.filter((c) => c !== code) : [...w, code]))
   const toggleKind = (kind) => setKinds((k) => ({ ...k, [kind]: !k[kind] }))
-  const filtersActive = JSON.stringify(filters) !== JSON.stringify(NO_FILTERS)
+  const filterCount = activeFilterCount(filters) + (major ? 1 : 0)
+  const clearAll = () => { setFilters(NO_FILTERS); setMajorId('') }
+
+  // Light / dark / follow the system, remembered per browser.
+  const [theme, setTheme] = useState(() => load('theme', 'system'))
+  useEffect(() => {
+    if (theme === 'system') delete document.documentElement.dataset.theme
+    else document.documentElement.dataset.theme = theme
+    save('theme', theme)
+  }, [theme])
+  const nextTheme = { system: 'light', light: 'dark', dark: 'system' }
+  const themeIcon = { system: 'monitor', light: 'sun', dark: 'moon' }
+
+  // "/" jumps to search from anywhere; Escape closes the phone filter sheet.
+  const searchRef = useRef(null)
+  const [sheetOpen, setSheetOpen] = useState(false)
+  useEffect(() => {
+    const onKey = (e) => {
+      const typing = /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement?.tagName ?? '')
+      if (e.key === '/' && !typing) {
+        e.preventDefault()
+        searchRef.current?.focus()
+      } else if (e.key === 'Escape') {
+        setSheetOpen(false)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   return (
     <div className={intro ? 'app intro' : 'app'}>
-      <header className="top">
-        <div className="brand">
-          <h1>Auburn Course Finder</h1>
-          {doc && <span className="muted">Seats as of {formatUpdated(doc.fetchedAt)}</span>}
-        </div>
-        <div className="search-row">
-          <input
-            type="search"
-            className="search"
-            placeholder="Course (COMP 1210), title, professor or CRN"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            aria-label="Search courses"
-            autoFocus
-          />
-          <select value={term} onChange={(e) => setTerm(e.target.value)} aria-label="Term">
+      <header className="topbar">
+        <div className="topbar-inner">
+          <a className="brand" href="./" aria-label="Auburn Course Finder home">
+            <img src="./favicon.svg" alt="" width="28" height="28" />
+            <span>
+              <strong>Course Finder</strong>
+              <small>Auburn University</small>
+            </span>
+          </a>
+          <label className="search">
+            <Icon name="search" size={18} />
+            <input
+              ref={searchRef}
+              type="search"
+              placeholder="Search COMP 1210, a title, professor or CRN"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              aria-label="Search courses"
+              autoFocus
+            />
+            {!query && <kbd>/</kbd>}
+          </label>
+          <select className="term" value={term} onChange={(e) => setTerm(e.target.value)} aria-label="Term">
             {terms.map((t) => <option key={t.code} value={t.code}>{t.description}</option>)}
           </select>
+          <button
+            type="button"
+            className="icon-btn theme-toggle"
+            onClick={() => setTheme(nextTheme[theme])}
+            title={`Theme: ${theme} (click for ${nextTheme[theme]})`}
+            aria-label={`Theme: ${theme}`}
+          >
+            <Icon name={themeIcon[theme]} size={18} />
+          </button>
+          <button type="button" className="sheet-toggle" onClick={() => setSheetOpen(true)} aria-expanded={sheetOpen}>
+            <Icon name="sliders" size={16} />
+            Filters
+            {filterCount > 0 && <span className="count">{filterCount}</span>}
+          </button>
         </div>
-        <MajorPicker majors={majors} majorId={major ? majorId : ''} onMajor={setMajorId} kinds={kinds} onToggleKind={toggleKind} />
-        <Filters filters={filters} onChange={setFilters} methods={methodList} />
       </header>
 
-      <WatchPanel watched={watched} onRemove={toggleWatch} />
-
-      <main>
-        {error && <p className="error" role="alert">{error}</p>}
-        {!error && !doc && (
-          <div aria-busy="true" aria-label="Loading sections">
-            {[0, 1, 2].map((i) => <div key={i} className="course skeleton" style={{ '--i': i }} />)}
+      <div className="layout">
+        <div className={sheetOpen ? 'scrim show' : 'scrim'} onClick={() => setSheetOpen(false)} aria-hidden="true" />
+        <aside className={sheetOpen ? 'sidebar open' : 'sidebar'} aria-label="Filters">
+          <div className="sidebar-head">
+            <h2>Filters</h2>
+            {filterCount > 0 && <button type="button" className="link" onClick={clearAll}>Clear all</button>}
+            <button type="button" className="icon-btn close" onClick={() => setSheetOpen(false)} aria-label="Close filters">
+              <Icon name="x" size={18} />
+            </button>
           </div>
-        )}
-        {doc && (
-          <>
-            <p className="muted status" aria-live="polite">
-              {courses.length.toLocaleString()} course{courses.length === 1 ? '' : 's'} ·{' '}
-              {sectionCount.toLocaleString()} section{sectionCount === 1 ? '' : 's'}
-              {filtersActive && (
-                <> · <button type="button" className="link" onClick={() => setFilters(NO_FILTERS)}>Clear filters</button></>
-              )}
-            </p>
-            {courses.slice(0, limit).map((c, i) => (
-              <CourseCard key={c.code} index={i} course={c} watched={watched.includes(c.code)} onToggleWatch={toggleWatch} />
-            ))}
-            {courses.length > limit && (
-              <button type="button" className="more page" onClick={() => setPage({ key: pageKey, limit: limit + PAGE })}>
-                Show more courses ({(courses.length - limit).toLocaleString()} left)
-              </button>
-            )}
-            {!courses.length && <p className="muted status">No sections match. Try fewer words or clear the filters.</p>}
-          </>
-        )}
-      </main>
+          <MajorPicker majors={majors} majorId={major ? majorId : ''} onMajor={setMajorId} kinds={kinds} onToggleKind={toggleKind} />
+          <Filters filters={filters} onChange={setFilters} methods={methodList} />
+          <button type="button" className="sheet-done" onClick={() => setSheetOpen(false)}>
+            Show {courses.length.toLocaleString()} course{courses.length === 1 ? '' : 's'}
+          </button>
+        </aside>
 
-      <footer className="muted">
-        Data from Auburn's public class search, refreshed daily. Seats change constantly; check TigerSchedule before you register.
-      </footer>
+        <main>
+          {error && <p className="error" role="alert">{error}</p>}
+          {!error && !doc && (
+            <div aria-busy="true" aria-label="Loading sections">
+              <div className="status skeleton-line" />
+              {[0, 1, 2].map((i) => <div key={i} className="course skeleton" style={{ '--i': i }} />)}
+            </div>
+          )}
+          {doc && (
+            <>
+              <div className="status" aria-live="polite">
+                <span>
+                  <strong>{courses.length.toLocaleString()}</strong> course{courses.length === 1 ? '' : 's'}
+                  <span className="muted"> · {sectionCount.toLocaleString()} section{sectionCount === 1 ? '' : 's'}</span>
+                </span>
+                <span className="updated"><i aria-hidden="true" />Seats as of {formatUpdated(doc.fetchedAt)}</span>
+              </div>
+              {courses.slice(0, limit).map((c, i) => (
+                <CourseCard key={c.code} index={i} course={c} watched={watched.includes(c.code)} onToggleWatch={toggleWatch} />
+              ))}
+              {courses.length > limit && (
+                <button type="button" className="load-more" onClick={() => setPage({ key: pageKey, limit: limit + PAGE })}>
+                  Show more courses <span className="muted">· {(courses.length - limit).toLocaleString()} left</span>
+                </button>
+              )}
+              {!courses.length && (
+                <div className="empty">
+                  <Icon name="inbox" size={28} />
+                  <strong>No sections match</strong>
+                  <span className="muted">Try fewer words, another term, or fewer filters.</span>
+                  {filterCount > 0 && <button type="button" className="btn" onClick={clearAll}>Clear filters</button>}
+                </div>
+              )}
+            </>
+          )}
+          <footer>
+            Data from Auburn's public class search, refreshed daily. Seats change constantly, so check TigerSchedule before you register.
+          </footer>
+        </main>
+      </div>
+
+      <WatchPanel watched={watched} onRemove={toggleWatch} />
     </div>
   )
 }

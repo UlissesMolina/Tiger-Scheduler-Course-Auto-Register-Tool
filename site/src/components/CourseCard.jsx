@@ -1,16 +1,55 @@
 import { useState } from 'react'
-import { formatCredits, formatInstructor, formatMeeting, formatPlace } from '../lib/format.js'
+import { formatCredits, formatInstructor, formatPlace, formatTime } from '../lib/format.js'
+import Icon from './Icon.jsx'
 
-const COLLAPSED = 6
+const COLLAPSED = 5
+const WEEK = ['M', 'T', 'W', 'R', 'F']
 
-function Seats({ section }) {
-  const { available, capacity } = section
-  const tone = available > 0 ? (available <= Math.max(3, capacity * 0.1) ? 'low' : 'open') : 'full'
+function seatTone(available, capacity) {
+  if (!capacity) return 'closed'
+  if (!(available > 0)) return 'full'
+  return available <= Math.max(3, capacity * 0.1) ? 'low' : 'open'
+}
+
+/** M T W R F with the meeting's days lit; weekend days are added only when used. */
+function DayStrip({ days = '' }) {
+  const shown = [...WEEK, ...['S', 'U'].filter((d) => days.includes(d))]
   return (
-    <span className={`seats ${tone}`}>
-      {available > 0 ? `${available} open` : 'Full'}
-      <span className="muted"> / {capacity}</span>
+    <span className="day-strip" aria-label={days ? `Meets ${days}` : 'No set days'}>
+      {shown.map((d) => <span key={d} className={days.includes(d) ? 'on' : ''}>{d}</span>)}
     </span>
+  )
+}
+
+function Meeting({ meeting }) {
+  if (!meeting.days && !meeting.begin) {
+    return <span className="meeting tba"><Icon name="clock" size={14} /> Time TBA</span>
+  }
+  const place = formatPlace(meeting)
+  return (
+    <span className="meeting">
+      <DayStrip days={meeting.days} />
+      <span className="time">{meeting.begin ? `${formatTime(meeting.begin)}–${formatTime(meeting.end)}` : 'TBA'}</span>
+      {place && <span className="place"><Icon name="pin" size={13} />{place}</span>}
+    </span>
+  )
+}
+
+function SeatMeter({ section }) {
+  const { available, capacity, enrolled, waitlist } = section
+  const tone = seatTone(available, capacity)
+  const fill = capacity ? Math.min(100, Math.round(((enrolled ?? 0) / capacity) * 100)) : 100
+  return (
+    <div className={`seat ${tone}`}>
+      <div className="seat-label">
+        <strong>{tone === 'closed' ? 'No seats' : available > 0 ? `${available} open` : 'Full'}</strong>
+        {tone !== 'closed' && <span className="muted">/ {capacity}</span>}
+      </div>
+      <div className="meter" role="meter" aria-valuemin={0} aria-valuemax={capacity} aria-valuenow={enrolled} aria-label="Seats taken">
+        <span style={{ width: `${fill}%` }} />
+      </div>
+      {waitlist > 0 && <span className="waitlist">{waitlist} waitlisted</span>}
+    </div>
   )
 }
 
@@ -26,8 +65,9 @@ function CopyCrn({ crn }) {
     }
   }
   return (
-    <button type="button" className="crn" onClick={copy} title="Copy CRN">
-      {copied ? 'Copied' : crn}
+    <button type="button" className={copied ? 'crn copied' : 'crn'} onClick={copy} title="Copy CRN">
+      <span>{crn}</span>
+      <Icon name={copied ? 'check' : 'copy'} size={13} />
     </button>
   )
 }
@@ -35,29 +75,20 @@ function CopyCrn({ crn }) {
 function SectionRow({ section }) {
   const instructors = section.instructors.length
     ? section.instructors.map((i) => formatInstructor(i.name)).join(', ')
-    : 'TBA'
-  const meetings = section.meetings.length ? section.meetings : [{}]
+    : 'Instructor TBA'
   return (
-    <div className="section-row" role="row">
-      <span className="cell sec" role="cell">
-        <strong>{section.section}</strong>
-        <span className="muted">{section.schedule}</span>
-      </span>
-      <span className="cell when" role="cell">
-        {meetings.map((m, i) => (
-          <span key={i}>
-            {formatMeeting(m)}
-            {formatPlace(m) && <span className="muted"> · {formatPlace(m)}</span>}
-          </span>
-        ))}
-      </span>
-      <span className="cell who" role="cell">{instructors}</span>
-      <span className="cell seat" role="cell">
-        <Seats section={section} />
-        {section.waitlist > 0 && <span className="muted">{section.waitlist} waitlisted</span>}
-      </span>
-      <span className="cell crn-cell" role="cell"><CopyCrn crn={section.crn} /></span>
-    </div>
+    <li className="section-row">
+      <div className="sec">
+        <span className="sec-num">{section.section}</span>
+        <span className="sec-type">{section.schedule}</span>
+      </div>
+      <div className="when">
+        {(section.meetings.length ? section.meetings : [{}]).map((m, i) => <Meeting key={i} meeting={m} />)}
+      </div>
+      <div className="who"><Icon name="user" size={14} /><span>{instructors}</span></div>
+      <SeatMeter section={section} />
+      <CopyCrn crn={section.crn} />
+    </li>
   )
 }
 
@@ -65,20 +96,21 @@ export default function CourseCard({ course, index = 0, watched, onToggleWatch }
   const [expanded, setExpanded] = useState(false)
   const shown = expanded ? course.sections : course.sections.slice(0, COLLAPSED)
   const hidden = course.sections.length - shown.length
+  const tone = seatTone(course.available, course.capacity)
 
   return (
     <article className="course" style={{ '--i': Math.min(index, 8) }}>
-      <header>
-        <div>
-          <h2>
-            <span className="code">{course.code}</span> {course.title}
+      <header className="course-head">
+        <div className="course-title">
+          <div className="course-kicker">
+            <span className="code">{course.code}</span>
             {course.tag && <span className={`tag ${course.tag.kind}`}>{course.tag.label}</span>}
-          </h2>
-          <p className="muted">
-            {formatCredits(course.credits)} · {course.sections.length} section{course.sections.length === 1 ? '' : 's'} ·{' '}
-            <span className={course.available > 0 ? 'ok' : 'bad'}>
-              {course.available} of {course.capacity} seats open
-            </span>
+          </div>
+          <h2>{course.title}</h2>
+          <p className="course-sub">
+            <span>{formatCredits(course.credits)}</span>
+            <span>{course.sections.length} section{course.sections.length === 1 ? '' : 's'}</span>
+            <span className={`pill ${tone}`}><i />{course.available} of {course.capacity} open</span>
           </p>
         </div>
         <button
@@ -87,24 +119,19 @@ export default function CourseCard({ course, index = 0, watched, onToggleWatch }
           aria-pressed={watched}
           onClick={() => onToggleWatch(course.code)}
         >
-          {watched ? '★ Watching' : '☆ Watch'}
+          <Icon name="star" size={15} filled={watched} />
+          {watched ? 'Watching' : 'Watch'}
         </button>
       </header>
 
-      <div className="sections" role="table" aria-label={`${course.code} sections`}>
-        <div className="section-row head" role="row">
-          <span role="columnheader">Section</span>
-          <span role="columnheader">When / where</span>
-          <span role="columnheader">Instructor</span>
-          <span role="columnheader">Seats</span>
-          <span role="columnheader">CRN</span>
-        </div>
+      <ul className="sections" aria-label={`${course.code} sections`}>
         {shown.map((s) => <SectionRow key={s.crn} section={s} />)}
-      </div>
+      </ul>
 
-      {(hidden > 0 || expanded) && course.sections.length > COLLAPSED && (
-        <button type="button" className="more" onClick={() => setExpanded(!expanded)}>
+      {course.sections.length > COLLAPSED && (
+        <button type="button" className="more" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>
           {expanded ? 'Show fewer' : `Show ${hidden} more section${hidden === 1 ? '' : 's'}`}
+          <Icon name="chevron" size={14} className={expanded ? 'flip' : ''} />
         </button>
       )}
     </article>

@@ -29,6 +29,10 @@ function minutes(hhmm) {
   return hhmm ? Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(2)) : null
 }
 
+export function activeFilterCount(filters) {
+  return [filters.openOnly, filters.days.length, filters.startAfter, filters.endBefore, filters.method].filter(Boolean).length
+}
+
 export function passesFilters(section, filters) {
   if (filters.openOnly && !(section.available > 0)) return false
   if (filters.method && section.method !== filters.method) return false
