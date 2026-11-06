@@ -7,8 +7,9 @@ import FilterBar from './components/FilterBar.jsx'
 import Filters from './components/Filters.jsx'
 import Icon from './components/Icon.jsx'
 import MajorPicker from './components/MajorPicker.jsx'
+import ProgressPage from './components/ProgressPage.jsx'
 import Watching from './components/Watching.jsx'
-import { auditTagger, courseStatus } from './lib/degreeworks.js'
+import { auditProgress, auditTagger, courseStatus } from './lib/degreeworks.js'
 import { formatUpdated } from './lib/format.js'
 import { activeFilterCount, buildIndex, majorTagger, methods, searchCourses } from './lib/search.js'
 import { load, save } from './lib/storage.js'
@@ -28,7 +29,7 @@ async function getJson(url) {
 
 function readUrl() {
   const p = new URLSearchParams(location.search)
-  return { term: p.get('term') ?? '', q: p.get('q') ?? '', major: p.get('major') }
+  return { term: p.get('term') ?? '', q: p.get('q') ?? '', major: p.get('major'), screen: p.get('page') }
 }
 
 export default function App() {
@@ -43,6 +44,7 @@ export default function App() {
   const doc = loaded.term === term ? loaded.doc : null
   const error = listError || (loaded.term === term ? loaded.error : '')
   const [query, setQuery] = useState(initial.q)
+  const [screen, setScreen] = useState(initial.screen === 'progress' ? 'progress' : 'courses')
   const [filters, setFilters] = useState(NO_FILTERS)
   const [watched, setWatched] = useState(() => load('watched', []))
   const [majorsDoc, setMajorsDoc] = useState(null)
@@ -78,8 +80,9 @@ export default function App() {
     if (term) p.set('term', term)
     if (query.trim()) p.set('q', query.trim())
     if (majorId) p.set('major', majorId)
+    if (screen === 'progress') p.set('page', 'progress')
     history.replaceState(null, '', `${location.pathname}${p.size ? `?${p}` : ''}`)
-  }, [term, query, majorId])
+  }, [term, query, majorId, screen])
 
   useEffect(() => save('watched', watched), [watched])
   useEffect(() => save('major', majorId), [majorId])
@@ -105,20 +108,32 @@ export default function App() {
   const [hideTaken, setHideTaken] = useState(() => load('hideTaken', true))
   const [importOpen, setImportOpen] = useState(false)
   const inPlan = planView && audit !== null
+  const [reqOnly, setReqOnly] = useState(null)
+  const onlyReq = inPlan && reqOnly != null && audit.needed[reqOnly] ? reqOnly : null
   useEffect(() => save('audit', audit), [audit])
   useEffect(() => save('planView', planView), [planView])
   useEffect(() => save('hideTaken', hideTaken), [hideTaken])
 
   // "Still needed" replaces the major filter while it is on.
   const tagger = useMemo(
-    () => (inPlan ? auditTagger(audit) : majorTagger(major, majorsDoc?.core ?? {}, kinds)),
-    [inPlan, audit, major, majorsDoc, kinds],
+    () => (inPlan ? auditTagger(audit, onlyReq) : majorTagger(major, majorsDoc?.core ?? {}, kinds)),
+    [inPlan, onlyReq, audit, major, majorsDoc, kinds],
   )
   const courses = useMemo(() => {
     const found = searchCourses(index, deferredQuery, filters, tagger)
     if (!audit || !hideTaken) return found
     return found.filter((c) => !(c.code in audit.taken) && !(c.code in audit.inProgress))
   }, [index, deferredQuery, filters, tagger, audit, hideTaken])
+  // How many of this term's courses could satisfy each still-needed requirement.
+  const offered = useMemo(
+    () => (audit ? audit.needed.map((_, i) => searchCourses(index, '', NO_FILTERS, auditTagger(audit, i)).length) : []),
+    [index, audit],
+  )
+  const progressPct = useMemo(() => {
+    if (!audit?.blocks) return null
+    const p = auditProgress(audit)
+    return p.total ? Math.round((p.complete / p.total) * 100) : 0
+  }, [audit])
   const neededCount = useMemo(
     () => (audit ? searchCourses(index, deferredQuery, filters, auditTagger(audit)).length : null),
     [index, deferredQuery, filters, audit],
@@ -138,9 +153,17 @@ export default function App() {
     setWatched((w) => (w.includes(code) ? w.filter((c) => c !== code) : [...w, code]))
   const toggleKind = (kind) => setKinds((k) => ({ ...k, [kind]: !k[kind] }))
   const filtersOn = activeFilterCount(filters) + (inPlan || major ? 1 : 0)
-  const clearAll = () => { setFilters(NO_FILTERS); setMajorId(''); setPlanView(false) }
+  const clearAll = () => { setFilters(NO_FILTERS); setMajorId(''); setPlanView(false); setReqOnly(null) }
   const saveAudit = (parsed) => { setAudit(parsed); setPlanView(true); setImportOpen(false) }
-  const removeAudit = () => { setAudit(null); setPlanView(false) }
+  const removeAudit = () => { setAudit(null); setPlanView(false); setReqOnly(null) }
+  const choosePlanView = (on) => { setPlanView(on); setReqOnly(null) }
+  const showRequirement = (i) => {
+    setPlanView(true)
+    setReqOnly(i)
+    setQuery('')
+    setScreen('courses')
+  }
+  const goTo = (s) => { setScreen(s); setDrawerOpen(false) }
 
   // Light / dark / follow the system, remembered per browser.
   const [theme, setTheme] = useState(() => load('theme', 'system'))
@@ -180,9 +203,11 @@ export default function App() {
         return
       }
       if (typing || e.metaKey || e.ctrlKey || e.altKey) return
+      if (screen !== 'courses' && e.key !== '/') return
       if (e.key === '/') {
         e.preventDefault()
-        searchRef.current?.focus()
+        setScreen('courses')
+        setTimeout(() => searchRef.current?.focus(), 0)
       } else if (e.key === 'j' || e.key === 'k') {
         if (!visible.length) return
         const at = visible.findIndex((c) => c.code === focused)
@@ -201,9 +226,12 @@ export default function App() {
   const nextTheme = NEXT_THEME[theme]
   const actions = [
     { label: filters.openOnly ? 'Show full sections too' : 'Show open seats only', icon: 'bolt', run: () => setFilters((f) => ({ ...f, openOnly: !f.openOnly })) },
+    screen === 'courses'
+      ? { label: 'Go to degree progress', icon: 'progress', run: () => setScreen('progress') }
+      : { label: 'Go to courses', icon: 'list', run: () => setScreen('courses') },
     { label: 'Focus search', icon: 'search', hint: '/', run: () => setTimeout(() => searchRef.current?.focus(), 0) },
     audit
-      ? { label: inPlan ? 'Show all courses' : 'Show courses I still need', icon: 'check', run: () => setPlanView(!inPlan) }
+      ? { label: inPlan ? 'Show all courses' : 'Show courses I still need', icon: 'check', run: () => { choosePlanView(!inPlan); setScreen('courses') } }
       : { label: 'Import Degree Works audit', icon: 'inbox', run: () => setImportOpen(true) },
     { label: `Theme: switch to ${nextTheme}`, icon: THEME_ICON[nextTheme], run: () => setTheme(nextTheme) },
     ...terms.filter((t) => t.code !== term).map((t) => ({ label: `Switch term to ${t.description}`, icon: 'calendar', run: () => setTerm(t.code) })),
@@ -237,18 +265,30 @@ export default function App() {
           <kbd>⌘K</kbd>
         </button>
 
+        <nav className="nav-group nav-pages" aria-label="Pages">
+          <button type="button" className={screen === 'courses' ? 'nav-item page on' : 'nav-item page'} aria-current={screen === 'courses' ? 'page' : undefined} onClick={() => goTo('courses')}>
+            <Icon name="list" size={15} />
+            <span>Courses</span>
+          </button>
+          <button type="button" className={screen === 'progress' ? 'nav-item page on' : 'nav-item page'} aria-current={screen === 'progress' ? 'page' : undefined} onClick={() => goTo('progress')}>
+            <Icon name="progress" size={15} />
+            <span>Degree progress</span>
+            {progressPct != null && <span className="nav-count">{progressPct}%</span>}
+          </button>
+        </nav>
+
         <DegreeWorks
           audit={audit}
           planView={inPlan}
-          onPlanView={setPlanView}
+          onPlanView={(on) => { choosePlanView(on); goTo('courses') }}
           hideTaken={hideTaken}
           onHideTaken={setHideTaken}
           neededCount={neededCount}
           onImport={() => setImportOpen(true)}
           onRemove={removeAudit}
         />
-        {!inPlan && <MajorPicker majors={majors} majorId={major ? majorId : ''} onMajor={setMajorId} kinds={kinds} onToggleKind={toggleKind} counts={kindCounts} />}
-        <Filters filters={filters} onChange={setFilters} methods={methodList} />
+        {screen === 'courses' && !inPlan && <MajorPicker majors={majors} majorId={major ? majorId : ''} onMajor={setMajorId} kinds={kinds} onToggleKind={toggleKind} counts={kindCounts} />}
+        {screen === 'courses' && <Filters filters={filters} onChange={setFilters} methods={methodList} />}
         <Watching watched={watched} onRemove={toggleWatch} onPick={showCourse} />
 
         <div className="sidebar-foot">
@@ -265,7 +305,7 @@ export default function App() {
             {filtersOn > 0 && <span className="badge-dot" aria-hidden="true" />}
           </button>
           <nav className="crumbs" aria-label="View">
-            <span className="crumb muted">Courses</span>
+            <span className="crumb muted">{screen === 'progress' ? 'Degree progress' : 'Courses'}</span>
             <Icon name="chevronRight" size={12} className="faint" />
             <label className="crumb-select">
               <select value={term} onChange={(e) => setTerm(e.target.value)} aria-label="Term">
@@ -274,14 +314,14 @@ export default function App() {
               <span aria-hidden="true">{termName}</span>
               <Icon name="chevron" size={12} />
             </label>
-            {(inPlan || major) && (
+            {screen === 'courses' && (inPlan || major) && (
               <>
                 <Icon name="chevronRight" size={12} className="faint" />
                 <span className="crumb">{inPlan ? 'Still needed' : major.name}</span>
               </>
             )}
           </nav>
-          <label className="search">
+          {screen === 'courses' && <label className="search">
             <Icon name="search" size={14} />
             <input
               ref={searchRef}
@@ -292,20 +332,32 @@ export default function App() {
               aria-label="Search courses"
             />
             {!query && <kbd>/</kbd>}
-          </label>
+          </label>}
         </header>
 
-        <FilterBar
+        {screen === 'courses' && <FilterBar
           filters={filters}
           onChange={setFilters}
           major={inPlan ? null : major}
           onClearMajor={() => setMajorId('')}
           view={inPlan ? 'Still needed' : null}
-          onClearView={() => setPlanView(false)}
+          onClearView={() => choosePlanView(false)}
+          requirement={onlyReq != null ? audit.needed[onlyReq].name : null}
+          onClearRequirement={() => setReqOnly(null)}
           onClearAll={clearAll}
-        />
+        />}
 
-        <div className="list">
+        {screen === 'progress' && (
+          <ProgressPage
+            audit={audit}
+            termName={termName}
+            offered={offered}
+            onShowRequirement={showRequirement}
+            onImport={() => setImportOpen(true)}
+          />
+        )}
+
+        {screen === 'courses' && <div className="list">
           {error && <p className="error" role="alert">{error}</p>}
           {!error && !doc && (
             <div aria-busy="true" aria-label="Loading sections">
@@ -348,7 +400,7 @@ export default function App() {
               </p>
             </>
           )}
-        </div>
+        </div>}
       </main>
 
       {importOpen && <AuditImport onSave={saveAudit} onClose={() => setImportOpen(false)} />}

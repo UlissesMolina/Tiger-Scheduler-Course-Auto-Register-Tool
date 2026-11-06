@@ -10,7 +10,6 @@
 const COURSE_LINE = /^([A-Z]{2,4}) (\d[0-9A-Z]{3})$/
 const NEEDED_LINE = /^(\d+(?:\.\d+)?) (Class|Classes|Credit|Credits|Hour|Hours) in (.+)$/
 const TABLE_HEADER = /^Course\s+Title\s+Grade\s+Credits\s+Term/
-const NOT_COMPLETE = /^(.*?)\s*Not complete/
 const TERM = /^(Fall|Spring|Summer|Winter) \d{4}$/
 
 /**
@@ -63,11 +62,12 @@ export function parseAudit(text) {
   const needed = []
   const taken = {}
   const inProgress = {}
-  let block = 'Degree'
+  const courses = {} // code -> { title, credits, term, status }, for the progress page
+  let block = { name: 'Degree', skip: false, requirements: [] }
+  const blocks = [block]
   let requirement = null
   let degree = null
   let auditDate = null
-  let inOtherCourses = false
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
@@ -78,19 +78,22 @@ export function parseAudit(text) {
 
     if (TABLE_HEADER.test(line)) {
       // The block name is the nearest real heading above the course table.
+      let name = 'Courses'
       for (let j = i - 1; j >= 0; j--) {
-        const prev = lines[j]
-        if (/^(Unmet conditions|Minimum credits|\*\*)/.test(prev)) continue
-        block = prev
+        if (/^(Unmet conditions|Minimum credits|\*\*)/.test(lines[j])) continue
+        name = lines[j]
         break
       }
-      inOtherCourses = /not degree-applicable/i.test(block)
+      block = { name, skip: SKIP_BLOCK.test(name), requirements: [] }
+      blocks.push(block)
+      requirement = null
       continue
     }
 
-    const notComplete = line.match(NOT_COMPLETE)
-    if (notComplete && notComplete[1]) {
-      requirement = notComplete[1]
+    const req = requirementLine(line)
+    if (req) {
+      requirement = { ...req, courses: [], needed: null }
+      if (!block.skip && !/^See /.test(req.name)) block.requirements.push(requirement)
       continue
     }
 
@@ -98,44 +101,83 @@ export function parseAudit(text) {
     if (need && i > 0 && lines.slice(Math.max(0, i - 2), i).includes('Still needed:')) {
       const { options, except } = parseCourseSpec(need[3])
       if (options.length) {
-        needed.push({
-          block,
-          name: requirement ?? block,
-          amount: Number(need[1]),
-          unit: /^Class/.test(need[2]) ? 'classes' : 'credits',
-          spec: need[3],
-          options,
-          except,
-        })
+        const amount = Number(need[1])
+        const unit = /^Class/.test(need[2]) ? 'classes' : 'credits'
+        needed.push({ block: block.name, name: requirement?.name ?? block.name, amount, unit, spec: need[3], options, except })
+        if (requirement) requirement.needed = { amount, unit, spec: need[3] }
       }
       continue
     }
 
     const course = line.match(COURSE_LINE)
     if (course) {
-      // Course rows run: code, title, grade, credits, term.
-      const [, , grade, credits, term] = lines.slice(i, i + 5)
+      // Course rows run: code, title, grade, credits, term. The grade is only
+      // used to tell taken from in progress, and is not kept.
+      const [, title, grade, credits, term] = lines.slice(i, i + 5)
       if (grade === undefined || !TERM.test(term ?? '')) continue
       const code = `${course[1]} ${course[2]}`
-      if (grade === '--' || /^\(.*\)$/.test(credits)) inProgress[code] = term
-      else if (!inOtherCourses || !(code in taken)) taken[code] = term
+      const status = grade === '--' || /^\(.*\)$/.test(credits) ? 'progress' : 'taken'
+      const entry = { code, title, credits: Number(credits.replace(/[()]/g, '')) || 0, term, status }
+      if (status === 'progress') inProgress[code] = term
+      else if (!(code in taken) || entry.credits > (courses[code]?.credits ?? 0)) taken[code] = term
+      // The same course can be listed twice (an AP duplicate at 0 credits); keep the real one.
+      if (!courses[code] || entry.credits > courses[code].credits || status === 'progress') courses[code] = entry
+      requirement?.courses.push(entry)
       i += 4
     }
   }
 
   for (const code of Object.keys(inProgress)) delete taken[code]
-  return { degree, auditDate, needed, taken, inProgress, importedAt: new Date().toISOString() }
+  // Headings that only group other requirements ("Calculus", "Biology:") have no courses of their own.
+  const kept = blocks
+    .filter((b) => !b.skip)
+    .map((b) => ({ name: b.name, requirements: b.requirements.filter((r) => r.courses.length || r.needed) }))
+    .filter((b) => b.requirements.length)
+  return { degree, auditDate, needed, taken, inProgress, courses, blocks: kept, importedAt: new Date().toISOString() }
+}
+
+const SKIP_BLOCK = /^(Pre-Requisites|Other Courses|In-progress and Preregistered)/i
+const REQUIREMENT_STATUS = [
+  [/\s*Requirement is complete/, 'complete'],
+  [/\s*When the in-progress classes are completed this requirement should be complete/, 'progress'],
+  [/\s*Nearly complete - see advisor/, 'needed'],
+  [/\s*Not complete/, 'needed'],
+]
+
+/** "Software Process Not completeSoftware Process" -> { name: 'Software Process', status: 'needed' } */
+function requirementLine(line) {
+  for (const [re, status] of REQUIREMENT_STATUS) {
+    const m = line.match(re)
+    if (m && m.index > 0) return { name: line.slice(0, m.index).trim(), status }
+  }
+  return null
+}
+
+/** Totals for the progress page: requirement counts and unique credits. */
+export function auditProgress(audit) {
+  const reqs = (audit.blocks ?? []).flatMap((b) => b.requirements)
+  const count = (s) => reqs.filter((r) => r.status === s).length
+  let credits = 0
+  let creditsInProgress = 0
+  for (const c of Object.values(audit.courses ?? {})) {
+    if (c.status === 'taken') credits += c.credits
+    else creditsInProgress += c.credits
+  }
+  return { total: reqs.length, complete: count('complete'), progress: count('progress'), needed: count('needed'), credits, creditsInProgress }
 }
 
 /**
  * Like majorTagger, for "Still needed": a course gets the first unmet
  * requirement it can satisfy, unless it is already taken or in progress.
+ * With `only`, just the courses for that one requirement (an index into needed).
  */
-export function auditTagger(audit) {
+export function auditTagger(audit, only = null) {
   if (!audit) return null
   return (code, subject, number) => {
     if (code in audit.taken || code in audit.inProgress) return null
-    const at = audit.needed.findIndex((r) => satisfies(r, subject, number))
+    const at = only != null
+      ? (audit.needed[only] && satisfies(audit.needed[only], subject, number) ? only : -1)
+      : audit.needed.findIndex((r) => satisfies(r, subject, number))
     if (at === -1) return null
     const r = audit.needed[at]
     const left = `${r.amount} ${r.unit === 'classes' ? (r.amount === 1 ? 'class' : 'classes') : 'cr'}`

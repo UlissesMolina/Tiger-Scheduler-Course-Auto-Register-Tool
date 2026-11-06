@@ -2,9 +2,10 @@ import { DAY_NAMES, DAY_ORDER, timeLabel } from '../lib/format.js'
 import Icon from './Icon.jsx'
 
 /** Active filters as removable chips under the header, the way Linear shows a view's filters. */
-export default function FilterBar({ filters, onChange, major, onClearMajor, view, onClearView, onClearAll }) {
+export default function FilterBar({ filters, onChange, major, onClearMajor, view, onClearView, requirement, onClearRequirement, onClearAll }) {
   const chips = []
   if (view) chips.push({ key: 'view', label: 'Degree Works', value: view, clear: onClearView })
+  if (requirement) chips.push({ key: 'req', label: 'Requirement', value: requirement, clear: onClearRequirement })
   if (major) chips.push({ key: 'major', label: 'Major', value: major.name, clear: onClearMajor })
   if (filters.openOnly) chips.push({ key: 'open', label: 'Seats', value: 'Open only', clear: () => onChange({ ...filters, openOnly: false }) })
   if (filters.days.length) {

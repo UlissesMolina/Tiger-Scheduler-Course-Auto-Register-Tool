@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { auditTagger, courseStatus, parseAudit, parseCourseSpec, satisfies } from './degreeworks.js'
+import { auditProgress, auditTagger, courseStatus, parseAudit, parseCourseSpec, satisfies } from './degreeworks.js'
 
 // A made-up audit in the exact shape Degree Works pastes as (Ctrl+A, Ctrl+C):
 // blank lines between fields, requirement names repeated, course rows as
@@ -180,6 +180,38 @@ test('course status', () => {
   assert.deepEqual(courseStatus(audit, 'COMP 3500'), { kind: 'progress', label: 'In progress · Fall 2026' })
   assert.deepEqual(courseStatus(audit, 'COMP 1210'), { kind: 'taken', label: 'Taken' })
   assert.equal(courseStatus(audit, 'COMP 5700'), null)
+})
+
+test('progress: every requirement with its status and courses, grouped by block', () => {
+  const audit = parseAudit(AUDIT)
+  assert.deepEqual(audit.blocks.map((b) => b.name), [
+    'Degree', 'Software Engineering Major Courses', 'Software Engineering Supporting Courses',
+  ])
+  const major = audit.blocks[1].requirements
+  assert.deepEqual(major.map((r) => [r.name, r.status]), [
+    ['Fundamentals of Computing I', 'complete'],
+    ['Introduction to Operating Systems', 'progress'],
+    ['Software Process', 'needed'],
+    ['Select 9 Hours of Technical Electives', 'needed'],
+  ])
+  assert.deepEqual(major[0].courses, [{ code: 'COMP 1210', title: 'Fundamentals Of Computing I', credits: 3, term: 'Fall 2024', status: 'taken' }])
+  assert.deepEqual(major[3].courses.map((c) => [c.code, c.status]), [['COMP 4200', 'progress']])
+  assert.deepEqual(major[3].needed, { amount: 3, unit: 'credits', spec: 'COMP 5970 or 5130 or 5210' })
+  // Other Courses is not degree-applicable and is left out of the blocks.
+  assert.ok(!audit.blocks.some((b) => /Other Courses/.test(b.name)))
+})
+
+test('progress totals count unique credits', () => {
+  const totals = auditProgress(parseAudit(AUDIT))
+  assert.deepEqual(totals, { total: 7, complete: 2, progress: 1, needed: 4, credits: 6, creditsInProgress: 6 })
+})
+
+test('tagger narrowed to one requirement', () => {
+  const audit = parseAudit(AUDIT)
+  const tech = audit.needed.findIndex((r) => r.name.startsWith('Select 9'))
+  const tag = auditTagger(audit, tech)
+  assert.equal(tag('COMP 5130', 'COMP', '5130').order, tech)
+  assert.equal(tag('COMP 5700', 'COMP', '5700'), null)
 })
 
 test('rejects text that is not an audit', () => {

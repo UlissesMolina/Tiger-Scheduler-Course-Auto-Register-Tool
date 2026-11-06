@@ -22,6 +22,8 @@ const PATHS = {
   inbox: <><path d="M2 9.2 3.8 3.5h8.4L14 9.2v3.3c0 .55-.45 1-1 1H3c-.55 0-1-.45-1-1z" /><path d="M2 9.2h3.3l.8 1.6h3.8l.8-1.6H14" /></>,
   bolt: <path d="M9 1.8 3.6 9h4l-.6 5.2L12.4 7h-4z" />,
   arrowRight: <path d="M3 8h10M9.5 4.5 13 8l-3.5 3.5" />,
+  list: <path d="M5.5 4h8M5.5 8h8M5.5 12h8M2.5 4h.01M2.5 8h.01M2.5 12h.01" />,
+  progress: <><circle cx="8" cy="8" r="5.8" /><path d="M8 2.2A5.8 5.8 0 0 1 13.8 8H8z" fill="currentColor" stroke="none" /></>,
 }
 
 export default function Icon({ name, size = 16, filled = false, className }) {
@@ -56,6 +58,31 @@ export function SeatPie({ taken, capacity, tone, size = 14 }) {
           strokeDasharray={`${frac * c} ${c}`} transform="rotate(-90 7 7)"
         />
       )}
+    </svg>
+  )
+}
+
+/** Linear-style requirement status: done (filled check), in progress (half), needed (dashed ring). */
+export function StatusIcon({ status, size = 14 }) {
+  if (status === 'complete') {
+    return (
+      <svg className="status-icon complete" width={size} height={size} viewBox="0 0 14 14" aria-label="Complete">
+        <circle cx="7" cy="7" r="6.3" fill="currentColor" />
+        <path d="m4.3 7.2 1.9 1.9 3.6-3.9" fill="none" stroke="var(--panel)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    )
+  }
+  if (status === 'progress') {
+    return (
+      <svg className="status-icon progress" width={size} height={size} viewBox="0 0 14 14" aria-label="In progress">
+        <circle cx="7" cy="7" r="6" fill="none" stroke="currentColor" strokeWidth="1.4" />
+        <path d="M7 3.2a3.8 3.8 0 0 1 0 7.6z" fill="currentColor" />
+      </svg>
+    )
+  }
+  return (
+    <svg className="status-icon needed" width={size} height={size} viewBox="0 0 14 14" aria-label="Still needed">
+      <circle cx="7" cy="7" r="6" fill="none" stroke="currentColor" strokeWidth="1.4" strokeDasharray="2.2 2" />
     </svg>
   )
 }
