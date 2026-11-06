@@ -28,6 +28,11 @@ test('course code queries match by prefix, with or without a space', () => {
   assert.deepEqual(codes('comp'), ['COMP 1210', 'COMP 2210'])
 })
 
+test('code matches rank ahead of title matches', () => {
+  const extra = buildIndex([...SECTIONS, section({ crn: '10005', subject: 'AERO', number: '7140', title: 'Advanced Computational Fluid Dynamics' })])
+  assert.deepEqual(searchCourses(extra, 'comp', NONE).map((c) => c.code), ['COMP 1210', 'COMP 2210', 'AERO 7140'])
+})
+
 test('words match title, instructor and CRN', () => {
   assert.deepEqual(codes('calculus'), ['MATH 1610'])
   assert.deepEqual(codes('ana lee'), ['COMP 2210'])

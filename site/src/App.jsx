@@ -65,6 +65,16 @@ export default function App() {
 
   useEffect(() => save('watched', watched), [watched])
 
+  // Cards rise in on the first load only; after that, typing a search swaps
+  // results instantly instead of replaying the entrance.
+  const [intro, setIntro] = useState(true)
+  const hasDoc = doc !== null
+  useEffect(() => {
+    if (!hasDoc) return
+    const t = setTimeout(() => setIntro(false), 1200)
+    return () => clearTimeout(t)
+  }, [hasDoc])
+
   const index = useMemo(() => (doc ? buildIndex(doc.sections) : []), [doc])
   const methodList = useMemo(() => (doc ? methods(doc.sections) : []), [doc])
   const courses = useMemo(() => searchCourses(index, deferredQuery, filters), [index, deferredQuery, filters])
@@ -75,7 +85,7 @@ export default function App() {
   const filtersActive = JSON.stringify(filters) !== JSON.stringify(NO_FILTERS)
 
   return (
-    <div className="app">
+    <div className={intro ? 'app intro' : 'app'}>
       <header className="top">
         <div className="brand">
           <h1>Auburn Course Finder</h1>
@@ -102,7 +112,11 @@ export default function App() {
 
       <main>
         {error && <p className="error" role="alert">{error}</p>}
-        {!error && !doc && <p className="muted status">Loading sections…</p>}
+        {!error && !doc && (
+          <div aria-busy="true" aria-label="Loading sections">
+            {[0, 1, 2].map((i) => <div key={i} className="course skeleton" style={{ '--i': i }} />)}
+          </div>
+        )}
         {doc && (
           <>
             <p className="muted status" aria-live="polite">
@@ -112,8 +126,8 @@ export default function App() {
                 <> · <button type="button" className="link" onClick={() => setFilters(NO_FILTERS)}>Clear filters</button></>
               )}
             </p>
-            {courses.slice(0, limit).map((c) => (
-              <CourseCard key={c.code} course={c} watched={watched.includes(c.code)} onToggleWatch={toggleWatch} />
+            {courses.slice(0, limit).map((c, i) => (
+              <CourseCard key={c.code} index={i} course={c} watched={watched.includes(c.code)} onToggleWatch={toggleWatch} />
             ))}
             {courses.length > limit && (
               <button type="button" className="more page" onClick={() => setPage({ key: pageKey, limit: limit + PAGE })}>

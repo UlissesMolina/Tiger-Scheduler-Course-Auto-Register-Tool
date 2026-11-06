@@ -119,6 +119,39 @@ select { padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px;
 
 footer { margin-top: 32px; font-size: 0.85rem; text-align: center; }
 
+/* First-load motion: header pieces rise in turn, then the first cards cascade. */
+@keyframes rise {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes pop {
+  0% { transform: scale(0); }
+  70% { transform: scale(1.5); }
+  100% { transform: scale(1); }
+}
+@keyframes shimmer { to { background-position: -200% 0; } }
+
+.brand h1 { animation: rise 0.5s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+.brand h1::after { animation: pop 0.45s 0.35s cubic-bezier(0.3, 1.4, 0.5, 1) both; }
+.brand .muted { animation: fade 0.6s 0.2s both; }
+.search-row { animation: rise 0.5s 0.08s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+.filters { animation: rise 0.5s 0.16s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+.watch-panel { animation: rise 0.4s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+
+.intro .status { animation: fade 0.4s both; }
+.intro .course { animation: rise 0.45s cubic-bezier(0.2, 0.7, 0.2, 1) both; animation-delay: calc(var(--i, 0) * 45ms + 60ms); }
+
+.course.skeleton {
+  height: 168px;
+  background: linear-gradient(90deg, var(--surface) 30%, var(--chip) 50%, var(--surface) 70%) 0 0 / 200% 100%;
+  animation: rise 0.4s calc(var(--i) * 80ms + 200ms) both, shimmer 1.3s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; }
+}
+
 @media (max-width: 720px) {
   .top { position: static; }
   .search-row { flex-direction: column; }

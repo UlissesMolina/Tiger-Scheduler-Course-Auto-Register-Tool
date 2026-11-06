@@ -67,7 +67,12 @@ export function searchCourses(index, query, filters) {
     course.available += Math.max(0, section.available ?? 0)
     course.capacity += section.capacity ?? 0
   }
-  return [...courses.values()].sort((a, b) => a.subject.localeCompare(b.subject) || a.number.localeCompare(b.number))
+  // "comp" also matches titles like "Computational ...", but the COMP courses
+  // are what was asked for, so code matches come first.
+  const code = query.trim().toLowerCase().match(CODE_QUERY)
+  const isCodeMatch = (c) => (code && c.subject.toLowerCase() === code[1] && c.number.startsWith(code[2]) ? 0 : 1)
+  return [...courses.values()].sort((a, b) =>
+    isCodeMatch(a) - isCodeMatch(b) || a.subject.localeCompare(b.subject) || a.number.localeCompare(b.number))
 }
 
 export function buildIndex(sections) {
