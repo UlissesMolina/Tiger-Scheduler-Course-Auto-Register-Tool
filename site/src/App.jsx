@@ -1,9 +1,11 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
-import CourseCard from './components/CourseCard.jsx'
+import CommandPalette from './components/CommandPalette.jsx'
+import CourseGroup from './components/CourseGroup.jsx'
+import FilterBar from './components/FilterBar.jsx'
 import Filters from './components/Filters.jsx'
 import Icon from './components/Icon.jsx'
 import MajorPicker from './components/MajorPicker.jsx'
-import WatchPanel from './components/WatchPanel.jsx'
+import Watching from './components/Watching.jsx'
 import { formatUpdated } from './lib/format.js'
 import { activeFilterCount, buildIndex, majorTagger, methods, searchCourses } from './lib/search.js'
 import { load, save } from './lib/storage.js'
@@ -11,6 +13,9 @@ import { load, save } from './lib/storage.js'
 const PAGE = 40
 const NO_FILTERS = { openOnly: false, days: [], startAfter: '', endBefore: '', method: '' }
 const ALL_KINDS = { required: true, elective: true, core: true }
+const NEXT_THEME = { system: 'light', light: 'dark', dark: 'system' }
+const THEME_ICON = { system: 'monitor', light: 'sun', dark: 'moon' }
+const groupId = (code) => `g-${code.replace(' ', '-')}`
 
 async function getJson(url) {
   const res = await fetch(url)
@@ -94,10 +99,19 @@ export default function App() {
   const courses = useMemo(() => searchCourses(index, deferredQuery, filters, tagger), [index, deferredQuery, filters, tagger])
   const sectionCount = useMemo(() => courses.reduce((n, c) => n + c.sections.length, 0), [courses])
 
+  // Course counts per kind for the sidebar, with every kind switched on.
+  const kindCounts = useMemo(() => {
+    if (!major) return null
+    const all = searchCourses(index, deferredQuery, filters, majorTagger(major, majorsDoc?.core ?? {}, ALL_KINDS))
+    const counts = { required: 0, elective: 0, core: 0 }
+    for (const c of all) counts[c.tag.kind] += 1
+    return counts
+  }, [index, deferredQuery, filters, major, majorsDoc])
+
   const toggleWatch = (code) =>
     setWatched((w) => (w.includes(code) ? w.filter((c) => c !== code) : [...w, code]))
   const toggleKind = (kind) => setKinds((k) => ({ ...k, [kind]: !k[kind] }))
-  const filterCount = activeFilterCount(filters) + (major ? 1 : 0)
+  const filtersOn = activeFilterCount(filters) + (major ? 1 : 0)
   const clearAll = () => { setFilters(NO_FILTERS); setMajorId('') }
 
   // Light / dark / follow the system, remembered per browser.
@@ -107,129 +121,202 @@ export default function App() {
     else document.documentElement.dataset.theme = theme
     save('theme', theme)
   }, [theme])
-  const nextTheme = { system: 'light', light: 'dark', dark: 'system' }
-  const themeIcon = { system: 'monitor', light: 'sun', dark: 'moon' }
 
-  // "/" jumps to search from anywhere; Escape closes the phone filter sheet.
   const searchRef = useRef(null)
-  const [sheetOpen, setSheetOpen] = useState(false)
+  const [drawerOpen, setDrawerOpen] = useState(false)
+  const [paletteOpen, setPaletteOpen] = useState(false)
+  const visible = courses.slice(0, limit)
+  // j / k move a focus ring between courses; w watches the focused one.
+  const [focusedCode, setFocusedCode] = useState(null)
+  const focused = visible.some((c) => c.code === focusedCode) ? focusedCode : null
+
+  const showCourse = (code) => {
+    setQuery(code)
+    setFocusedCode(code)
+    setDrawerOpen(false)
+  }
+
   useEffect(() => {
     const onKey = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault()
+        setPaletteOpen((open) => !open)
+        return
+      }
+      if (paletteOpen) return
       const typing = /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement?.tagName ?? '')
-      if (e.key === '/' && !typing) {
+      if (e.key === 'Escape') {
+        setDrawerOpen(false)
+        if (typing) document.activeElement.blur()
+        else setFocusedCode(null)
+        return
+      }
+      if (typing || e.metaKey || e.ctrlKey || e.altKey) return
+      if (e.key === '/') {
         e.preventDefault()
         searchRef.current?.focus()
-      } else if (e.key === 'Escape') {
-        setSheetOpen(false)
+      } else if (e.key === 'j' || e.key === 'k') {
+        if (!visible.length) return
+        const at = visible.findIndex((c) => c.code === focused)
+        const next = e.key === 'j' ? Math.min(visible.length - 1, at + 1) : Math.max(0, at === -1 ? 0 : at - 1)
+        const code = visible[next].code
+        setFocusedCode(code)
+        document.getElementById(groupId(code))?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+      } else if (e.key === 'w' && focused) {
+        toggleWatch(focused)
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [])
+  })
+
+  const nextTheme = NEXT_THEME[theme]
+  const actions = [
+    { label: filters.openOnly ? 'Show full sections too' : 'Show open seats only', icon: 'bolt', run: () => setFilters((f) => ({ ...f, openOnly: !f.openOnly })) },
+    { label: 'Focus search', icon: 'search', hint: '/', run: () => setTimeout(() => searchRef.current?.focus(), 0) },
+    { label: `Theme: switch to ${nextTheme}`, icon: THEME_ICON[nextTheme], run: () => setTheme(nextTheme) },
+    ...terms.filter((t) => t.code !== term).map((t) => ({ label: `Switch term to ${t.description}`, icon: 'calendar', run: () => setTerm(t.code) })),
+    ...(filtersOn ? [{ label: 'Clear all filters', icon: 'x', run: clearAll }] : []),
+  ]
+
+  const termName = terms.find((t) => t.code === term)?.description ?? 'Loading'
 
   return (
-    <div className={intro ? 'app intro' : 'app'}>
-      <header className="topbar">
-        <div className="topbar-inner">
-          <a className="brand" href="./" aria-label="Auburn Course Finder home">
-            <img src="./favicon.svg" alt="" width="28" height="28" />
-            <span>
-              <strong>Course Finder</strong>
-              <small>Auburn University</small>
-            </span>
-          </a>
+    <div className={intro ? 'shell intro' : 'shell'}>
+      <div className={drawerOpen ? 'scrim show' : 'scrim'} onClick={() => setDrawerOpen(false)} aria-hidden="true" />
+
+      <aside className={drawerOpen ? 'sidebar open' : 'sidebar'} aria-label="Navigation and filters">
+        <div className="workspace">
+          <img src="./favicon.svg" alt="" width="22" height="22" />
+          <span className="workspace-name">Course Finder</span>
+          <button
+            type="button"
+            className="ghost-icon"
+            onClick={() => setTheme(nextTheme)}
+            title={`Theme: ${theme}`}
+            aria-label={`Theme: ${theme}. Switch to ${nextTheme}`}
+          >
+            <Icon name={THEME_ICON[theme]} size={15} />
+          </button>
+        </div>
+
+        <button type="button" className="nav-item search-trigger" onClick={() => setPaletteOpen(true)}>
+          <Icon name="search" size={15} />
+          <span>Search or jump to…</span>
+          <kbd>⌘K</kbd>
+        </button>
+
+        <MajorPicker majors={majors} majorId={major ? majorId : ''} onMajor={setMajorId} kinds={kinds} onToggleKind={toggleKind} counts={kindCounts} />
+        <Filters filters={filters} onChange={setFilters} methods={methodList} />
+        <Watching watched={watched} onRemove={toggleWatch} onPick={showCourse} />
+
+        <div className="sidebar-foot">
+          {doc
+            ? <span className="synced"><i aria-hidden="true" />Seats as of {formatUpdated(doc.fetchedAt)}</span>
+            : <span className="faint">Loading seats…</span>}
+        </div>
+      </aside>
+
+      <main className="panel">
+        <header className="panel-head">
+          <button type="button" className="ghost-icon menu" onClick={() => setDrawerOpen(true)} aria-label="Open filters">
+            <Icon name="menu" size={16} />
+            {filtersOn > 0 && <span className="badge-dot" aria-hidden="true" />}
+          </button>
+          <nav className="crumbs" aria-label="View">
+            <span className="crumb muted">Courses</span>
+            <Icon name="chevronRight" size={12} className="faint" />
+            <label className="crumb-select">
+              <select value={term} onChange={(e) => setTerm(e.target.value)} aria-label="Term">
+                {terms.map((t) => <option key={t.code} value={t.code}>{t.description}</option>)}
+              </select>
+              <span aria-hidden="true">{termName}</span>
+              <Icon name="chevron" size={12} />
+            </label>
+            {major && (
+              <>
+                <Icon name="chevronRight" size={12} className="faint" />
+                <span className="crumb">{major.name}</span>
+              </>
+            )}
+          </nav>
           <label className="search">
-            <Icon name="search" size={18} />
+            <Icon name="search" size={14} />
             <input
               ref={searchRef}
               type="search"
-              placeholder="Search COMP 1210, a title, professor or CRN"
+              placeholder="Filter by course, title, professor, CRN"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               aria-label="Search courses"
-              autoFocus
             />
             {!query && <kbd>/</kbd>}
           </label>
-          <select className="term" value={term} onChange={(e) => setTerm(e.target.value)} aria-label="Term">
-            {terms.map((t) => <option key={t.code} value={t.code}>{t.description}</option>)}
-          </select>
-          <button
-            type="button"
-            className="icon-btn theme-toggle"
-            onClick={() => setTheme(nextTheme[theme])}
-            title={`Theme: ${theme} (click for ${nextTheme[theme]})`}
-            aria-label={`Theme: ${theme}`}
-          >
-            <Icon name={themeIcon[theme]} size={18} />
-          </button>
-          <button type="button" className="sheet-toggle" onClick={() => setSheetOpen(true)} aria-expanded={sheetOpen}>
-            <Icon name="sliders" size={16} />
-            Filters
-            {filterCount > 0 && <span className="count">{filterCount}</span>}
-          </button>
-        </div>
-      </header>
+        </header>
 
-      <div className="layout">
-        <div className={sheetOpen ? 'scrim show' : 'scrim'} onClick={() => setSheetOpen(false)} aria-hidden="true" />
-        <aside className={sheetOpen ? 'sidebar open' : 'sidebar'} aria-label="Filters">
-          <div className="sidebar-head">
-            <h2>Filters</h2>
-            {filterCount > 0 && <button type="button" className="link" onClick={clearAll}>Clear all</button>}
-            <button type="button" className="icon-btn close" onClick={() => setSheetOpen(false)} aria-label="Close filters">
-              <Icon name="x" size={18} />
-            </button>
-          </div>
-          <MajorPicker majors={majors} majorId={major ? majorId : ''} onMajor={setMajorId} kinds={kinds} onToggleKind={toggleKind} />
-          <Filters filters={filters} onChange={setFilters} methods={methodList} />
-          <button type="button" className="sheet-done" onClick={() => setSheetOpen(false)}>
-            Show {courses.length.toLocaleString()} course{courses.length === 1 ? '' : 's'}
-          </button>
-        </aside>
+        <FilterBar
+          filters={filters}
+          onChange={setFilters}
+          major={major}
+          onClearMajor={() => setMajorId('')}
+          onClearAll={clearAll}
+        />
 
-        <main>
+        <div className="list">
           {error && <p className="error" role="alert">{error}</p>}
           {!error && !doc && (
             <div aria-busy="true" aria-label="Loading sections">
-              <div className="status skeleton-line" />
-              {[0, 1, 2].map((i) => <div key={i} className="course skeleton" style={{ '--i': i }} />)}
+              {[0, 1, 2, 3].map((i) => <div key={i} className="skeleton" style={{ '--i': i }} />)}
             </div>
           )}
           {doc && (
             <>
-              <div className="status" aria-live="polite">
-                <span>
-                  <strong>{courses.length.toLocaleString()}</strong> course{courses.length === 1 ? '' : 's'}
-                  <span className="muted"> · {sectionCount.toLocaleString()} section{sectionCount === 1 ? '' : 's'}</span>
-                </span>
-                <span className="updated"><i aria-hidden="true" />Seats as of {formatUpdated(doc.fetchedAt)}</span>
+              <div className="list-meta" aria-live="polite">
+                <span><b>{courses.length.toLocaleString()}</b> course{courses.length === 1 ? '' : 's'}</span>
+                <span className="faint">·</span>
+                <span>{sectionCount.toLocaleString()} section{sectionCount === 1 ? '' : 's'}</span>
               </div>
-              {courses.slice(0, limit).map((c, i) => (
-                <CourseCard key={c.code} index={i} course={c} watched={watched.includes(c.code)} onToggleWatch={toggleWatch} />
+              {visible.map((c, i) => (
+                <CourseGroup
+                  key={c.code}
+                  index={i}
+                  course={c}
+                  watched={watched.includes(c.code)}
+                  focused={focused === c.code}
+                  onToggleWatch={toggleWatch}
+                />
               ))}
               {courses.length > limit && (
                 <button type="button" className="load-more" onClick={() => setPage({ key: pageKey, limit: limit + PAGE })}>
-                  Show more courses <span className="muted">· {(courses.length - limit).toLocaleString()} left</span>
+                  Load {Math.min(PAGE, courses.length - limit)} more <span className="faint">of {(courses.length - limit).toLocaleString()}</span>
                 </button>
               )}
               {!courses.length && (
                 <div className="empty">
-                  <Icon name="inbox" size={28} />
-                  <strong>No sections match</strong>
+                  <Icon name="inbox" size={22} />
+                  <b>No sections match</b>
                   <span className="muted">Try fewer words, another term, or fewer filters.</span>
-                  {filterCount > 0 && <button type="button" className="btn" onClick={clearAll}>Clear filters</button>}
+                  {filtersOn > 0 && <button type="button" className="btn" onClick={clearAll}>Clear filters</button>}
                 </div>
               )}
+              <p className="fineprint">
+                Data from Auburn&apos;s public class search, refreshed daily. Seats change constantly, so check TigerSchedule before you register.
+              </p>
             </>
           )}
-          <footer>
-            Data from Auburn's public class search, refreshed daily. Seats change constantly, so check TigerSchedule before you register.
-          </footer>
-        </main>
-      </div>
+        </div>
+      </main>
 
-      <WatchPanel watched={watched} onRemove={toggleWatch} />
+      {paletteOpen && (
+        <CommandPalette
+          index={index}
+          majors={majors}
+          actions={actions}
+          onPickCourse={showCourse}
+          onPickMajor={setMajorId}
+          onClose={() => setPaletteOpen(false)}
+        />
+      )}
     </div>
   )
 }
