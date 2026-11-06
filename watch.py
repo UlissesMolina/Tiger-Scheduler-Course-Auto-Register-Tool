@@ -7,9 +7,12 @@ stops on its own after an end date so it cannot quietly run for months.
     python watch.py                 # watch COURSES from .env
     python watch.py --once          # one check, print the seats, exit
     python watch.py --test-alert    # send a test notification and exit
+    python watch.py --check         # one check against saved state, then exit
+                                    # (for a scheduler such as GitHub Actions)
 """
 
 import argparse
+import json
 import logging
 import os
 import random
@@ -17,6 +20,7 @@ import sys
 import time
 import urllib.request
 from datetime import date, datetime, timedelta
+from pathlib import Path
 
 from config import Config
 from notifier import send_email_alert
@@ -130,6 +134,82 @@ def describe(s):
     return code, text
 
 
+def check(term, courses, crns, previous, first=False):
+    """
+    One check: alert on newly opened sections, log changes, return the new seat map.
+    The first check sends one summary instead of an alert per section that is
+    already open, and doubles as confirmation that alerts reach you.
+    """
+    sections = watched_sections(fetch_courses(term, courses), crns)
+    if first:
+        open_now = [s for s in sections if (s["available"] or 0) > 0]
+        summary = (f"{len(open_now)} of {len(sections)} sections open now: " + ", ".join(describe(s)[0] for s in open_now[:8])
+                   + ("…" if len(open_now) > 8 else "") if open_now
+                   else f"None of {len(sections)} sections are open yet. You'll get an alert when one opens.")
+        alert(f"Seat watcher started: {', '.join(courses)}", summary)
+    else:
+        for s in newly_open(sections, previous):
+            code, text = describe(s)
+            alert(f"Seat open: {code}", text)
+    for s in sections:
+        if previous.get(s["crn"]) != s["available"]:
+            log.info(describe(s)[1])
+    return {s["crn"]: s["available"] for s in sections}
+
+
+# ---------- state between scheduled runs ----------
+
+def load_state(path):
+    try:
+        return json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def save_state(path, state):
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(state, indent=1, sort_keys=True), encoding="utf-8")
+
+
+def run_check(term, courses, crns, quiet, until_setting, state_path, now=None):
+    """
+    A single scheduled check. The seat map, failure count and start date live
+    in the state file, so alerts still fire once per opening and the 21-day
+    default end date still holds across separate runs.
+    """
+    now = now or datetime.now()
+    state = load_state(state_path)
+    state.setdefault("started", now.date().isoformat())
+    until = watch_until(until_setting, date.fromisoformat(state["started"]))
+    if now.date() > until:
+        log.info(f"Past the end date ({until}); not checking. Set WATCH_UNTIL to keep watching.")
+        return 0
+    if is_quiet(now, quiet):
+        log.info("Quiet hours; not checking.")
+        return 0
+
+    # A different watch list starts fresh, so nothing is compared against old courses.
+    watching = sorted(courses) + sorted(crns)
+    if state.get("watching") != watching:
+        state.update(watching=watching, failures=0)
+        state.pop("previous", None)
+
+    code = 0
+    try:
+        state["previous"] = check(term, courses, crns, state.get("previous", {}), first="previous" not in state)
+        state["failures"] = 0
+    except (FetchError, ValueError, KeyError) as e:
+        state["failures"] = state.get("failures", 0) + 1
+        log.warning(f"Check failed ({state['failures']} in a row): {e}")
+        if state["failures"] == FAILURE_ALERT_AFTER:
+            alert("Seat watcher can't reach Auburn", f"{state['failures']} checks in a row failed. Last error: {e}")
+        code = 1
+    state["checked"] = now.isoformat(timespec="seconds")
+    save_state(state_path, state)
+    return code
+
+
 # ---------- alerts ----------
 
 def send_ntfy(title, message):
@@ -160,6 +240,7 @@ def parse_args():
     p.add_argument("--courses", help='Comma-separated courses, e.g. "COMP 1210,MATH 2660" (default: COURSES)')
     p.add_argument("--once", action="store_true", help="Check once, print every section's seats, and exit")
     p.add_argument("--test-alert", action="store_true", help="Send a test notification and exit")
+    p.add_argument("--check", action="store_true", help="Check once against saved state (WATCH_STATE) and exit")
     return p.parse_args()
 
 
@@ -181,6 +262,9 @@ def main():
         for s in watched_sections(fetch_courses(term, courses), crns):
             print(describe(s)[1])
         return 0
+    if args.check:
+        log.info(f"Checking {', '.join(courses)} in term {term}" + (f", CRNs {', '.join(sorted(crns))}" if crns else ""))
+        return run_check(term, courses, crns, quiet, Config.WATCH_UNTIL, Config.WATCH_STATE)
 
     log.info(f"Watching {', '.join(courses)} in term {term}"
              + (f", CRNs {', '.join(sorted(crns))}" if crns else "")
@@ -188,7 +272,7 @@ def main():
              + (f", quiet {quiet[0]}:00-{quiet[1]}:00" if quiet else "")
              + f", until {until}")
 
-    previous, failures = {}, 0
+    previous, failures, first = {}, 0, True
     while True:
         now = datetime.now()
         if now.date() > until:
@@ -201,15 +285,8 @@ def main():
             continue
 
         try:
-            sections = watched_sections(fetch_courses(term, courses), crns)
-            for s in newly_open(sections, previous):
-                code, text = describe(s)
-                alert(f"Seat open: {code}", text)
-            changed = [s for s in sections if previous.get(s["crn"]) != s["available"]]
-            for s in changed:
-                log.info(describe(s)[1])
-            previous = {s["crn"]: s["available"] for s in sections}
-            failures = 0
+            previous = check(term, courses, crns, previous, first=first)
+            failures, first = 0, False
         except (FetchError, ValueError, KeyError) as e:
             failures += 1
             log.warning(f"Check failed ({failures} in a row): {e}")

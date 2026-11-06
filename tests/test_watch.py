@@ -65,5 +65,65 @@ class AlertLogicTest(unittest.TestCase):
         self.assertIn("4 on the waitlist", text)
 
 
+class RunCheckTest(unittest.TestCase):
+    """--check: one check per run, with seats remembered in a state file between runs."""
+
+    def setUp(self):
+        import tempfile
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+        self.state = Path(self.dir.name) / "state.json"
+        self.alerts = []
+        patcher = mock.patch.object(watch, "alert", lambda title, text: self.alerts.append(title))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def run_with(self, sections, now=datetime(2026, 11, 6, 12, 0), courses=("COMP 1210",), until=""):
+        with mock.patch.object(watch, "fetch_courses", return_value=sections):
+            return watch.run_check("202720", list(courses), set(), (23, 7), until, self.state, now=now)
+
+    def test_alerts_once_across_runs_and_again_after_reopening(self):
+        self.run_with([section("1", 0)])
+        self.assertEqual(self.alerts, ["Seat watcher started: COMP 1210"])
+        self.run_with([section("1", 2)])
+        self.run_with([section("1", 2)])
+        self.assertEqual(self.alerts[1:], ["Seat open: COMP 1210-001"])
+        self.run_with([section("1", 0)])
+        self.run_with([section("1", 1)])
+        self.assertEqual(len(self.alerts), 3)
+
+    def test_first_check_sends_one_summary_not_one_per_open_section(self):
+        self.run_with([section("1", 2), section("2", 5), section("3", 0)])
+        self.assertEqual(self.alerts, ["Seat watcher started: COMP 1210"])
+        self.run_with([section("1", 2), section("2", 5), section("3", 0)])
+        self.assertEqual(len(self.alerts), 1)
+
+    def test_changed_watch_list_starts_fresh(self):
+        self.run_with([section("1", 2)])
+        self.run_with([section("1", 2), section("9", 1, number="2660", subject="MATH")], courses=("COMP 1210", "MATH 2660"))
+        # A new list gets its own "started" summary rather than alerts for old openings.
+        self.assertEqual(self.alerts, ["Seat watcher started: COMP 1210", "Seat watcher started: COMP 1210, MATH 2660"])
+
+    def test_default_end_date_counts_from_first_run(self):
+        self.run_with([section("1", 0)], now=datetime(2026, 11, 6, 12, 0))
+        with mock.patch.object(watch, "fetch_courses") as fetch:
+            watch.run_check("202720", ["COMP 1210"], set(), (23, 7), "", self.state, now=datetime(2026, 11, 28, 12, 0))
+            fetch.assert_not_called()
+
+    def test_quiet_hours_skip_the_check(self):
+        with mock.patch.object(watch, "fetch_courses") as fetch:
+            self.assertEqual(watch.run_check("202720", ["COMP 1210"], set(), (23, 7), "", self.state, now=datetime(2026, 11, 6, 2, 0)), 0)
+            fetch.assert_not_called()
+
+    def test_failures_are_counted_and_alerted_once(self):
+        with mock.patch.object(watch, "fetch_courses", side_effect=watch.FetchError("down")):
+            codes = [watch.run_check("202720", ["COMP 1210"], set(), (23, 7), "", self.state, now=datetime(2026, 11, 6, 12, 0))
+                     for _ in range(6)]
+        self.assertEqual(codes, [1] * 6)
+        self.assertEqual(self.alerts, ["Seat watcher can't reach Auburn"])
+        self.run_with([section("1", 0)])
+        self.assertEqual(watch.load_state(self.state)["failures"], 0)
+
+
 if __name__ == "__main__":
     unittest.main()
