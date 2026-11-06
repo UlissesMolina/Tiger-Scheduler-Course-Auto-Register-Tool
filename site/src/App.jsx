@@ -1,11 +1,14 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
+import AuditImport from './components/AuditImport.jsx'
 import CommandPalette from './components/CommandPalette.jsx'
 import CourseGroup from './components/CourseGroup.jsx'
+import DegreeWorks from './components/DegreeWorks.jsx'
 import FilterBar from './components/FilterBar.jsx'
 import Filters from './components/Filters.jsx'
 import Icon from './components/Icon.jsx'
 import MajorPicker from './components/MajorPicker.jsx'
 import Watching from './components/Watching.jsx'
+import { auditTagger, courseStatus } from './lib/degreeworks.js'
 import { formatUpdated } from './lib/format.js'
 import { activeFilterCount, buildIndex, majorTagger, methods, searchCourses } from './lib/search.js'
 import { load, save } from './lib/storage.js'
@@ -95,24 +98,49 @@ export default function App() {
   const methodList = useMemo(() => (doc ? methods(doc.sections) : []), [doc])
   const majors = majorsDoc?.majors ?? []
   const major = majors.find((m) => m.id === majorId) ?? null
-  const tagger = useMemo(() => majorTagger(major, majorsDoc?.core ?? {}, kinds), [major, majorsDoc, kinds])
-  const courses = useMemo(() => searchCourses(index, deferredQuery, filters, tagger), [index, deferredQuery, filters, tagger])
+
+  // Degree Works audit: only parsed requirements and course codes, kept in this browser.
+  const [audit, setAudit] = useState(() => load('audit', null))
+  const [planView, setPlanView] = useState(() => load('planView', false))
+  const [hideTaken, setHideTaken] = useState(() => load('hideTaken', true))
+  const [importOpen, setImportOpen] = useState(false)
+  const inPlan = planView && audit !== null
+  useEffect(() => save('audit', audit), [audit])
+  useEffect(() => save('planView', planView), [planView])
+  useEffect(() => save('hideTaken', hideTaken), [hideTaken])
+
+  // "Still needed" replaces the major filter while it is on.
+  const tagger = useMemo(
+    () => (inPlan ? auditTagger(audit) : majorTagger(major, majorsDoc?.core ?? {}, kinds)),
+    [inPlan, audit, major, majorsDoc, kinds],
+  )
+  const courses = useMemo(() => {
+    const found = searchCourses(index, deferredQuery, filters, tagger)
+    if (!audit || !hideTaken) return found
+    return found.filter((c) => !(c.code in audit.taken) && !(c.code in audit.inProgress))
+  }, [index, deferredQuery, filters, tagger, audit, hideTaken])
+  const neededCount = useMemo(
+    () => (audit ? searchCourses(index, deferredQuery, filters, auditTagger(audit)).length : null),
+    [index, deferredQuery, filters, audit],
+  )
   const sectionCount = useMemo(() => courses.reduce((n, c) => n + c.sections.length, 0), [courses])
 
   // Course counts per kind for the sidebar, with every kind switched on.
   const kindCounts = useMemo(() => {
-    if (!major) return null
+    if (!major || inPlan) return null
     const all = searchCourses(index, deferredQuery, filters, majorTagger(major, majorsDoc?.core ?? {}, ALL_KINDS))
     const counts = { required: 0, elective: 0, core: 0 }
     for (const c of all) counts[c.tag.kind] += 1
     return counts
-  }, [index, deferredQuery, filters, major, majorsDoc])
+  }, [index, deferredQuery, filters, major, majorsDoc, inPlan])
 
   const toggleWatch = (code) =>
     setWatched((w) => (w.includes(code) ? w.filter((c) => c !== code) : [...w, code]))
   const toggleKind = (kind) => setKinds((k) => ({ ...k, [kind]: !k[kind] }))
-  const filtersOn = activeFilterCount(filters) + (major ? 1 : 0)
-  const clearAll = () => { setFilters(NO_FILTERS); setMajorId('') }
+  const filtersOn = activeFilterCount(filters) + (inPlan || major ? 1 : 0)
+  const clearAll = () => { setFilters(NO_FILTERS); setMajorId(''); setPlanView(false) }
+  const saveAudit = (parsed) => { setAudit(parsed); setPlanView(true); setImportOpen(false) }
+  const removeAudit = () => { setAudit(null); setPlanView(false) }
 
   // Light / dark / follow the system, remembered per browser.
   const [theme, setTheme] = useState(() => load('theme', 'system'))
@@ -140,10 +168,10 @@ export default function App() {
     const onKey = (e) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault()
-        setPaletteOpen((open) => !open)
+        if (!importOpen) setPaletteOpen((open) => !open)
         return
       }
-      if (paletteOpen) return
+      if (paletteOpen || importOpen) return
       const typing = /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement?.tagName ?? '')
       if (e.key === 'Escape') {
         setDrawerOpen(false)
@@ -174,6 +202,9 @@ export default function App() {
   const actions = [
     { label: filters.openOnly ? 'Show full sections too' : 'Show open seats only', icon: 'bolt', run: () => setFilters((f) => ({ ...f, openOnly: !f.openOnly })) },
     { label: 'Focus search', icon: 'search', hint: '/', run: () => setTimeout(() => searchRef.current?.focus(), 0) },
+    audit
+      ? { label: inPlan ? 'Show all courses' : 'Show courses I still need', icon: 'check', run: () => setPlanView(!inPlan) }
+      : { label: 'Import Degree Works audit', icon: 'inbox', run: () => setImportOpen(true) },
     { label: `Theme: switch to ${nextTheme}`, icon: THEME_ICON[nextTheme], run: () => setTheme(nextTheme) },
     ...terms.filter((t) => t.code !== term).map((t) => ({ label: `Switch term to ${t.description}`, icon: 'calendar', run: () => setTerm(t.code) })),
     ...(filtersOn ? [{ label: 'Clear all filters', icon: 'x', run: clearAll }] : []),
@@ -206,7 +237,17 @@ export default function App() {
           <kbd>⌘K</kbd>
         </button>
 
-        <MajorPicker majors={majors} majorId={major ? majorId : ''} onMajor={setMajorId} kinds={kinds} onToggleKind={toggleKind} counts={kindCounts} />
+        <DegreeWorks
+          audit={audit}
+          planView={inPlan}
+          onPlanView={setPlanView}
+          hideTaken={hideTaken}
+          onHideTaken={setHideTaken}
+          neededCount={neededCount}
+          onImport={() => setImportOpen(true)}
+          onRemove={removeAudit}
+        />
+        {!inPlan && <MajorPicker majors={majors} majorId={major ? majorId : ''} onMajor={setMajorId} kinds={kinds} onToggleKind={toggleKind} counts={kindCounts} />}
         <Filters filters={filters} onChange={setFilters} methods={methodList} />
         <Watching watched={watched} onRemove={toggleWatch} onPick={showCourse} />
 
@@ -233,10 +274,10 @@ export default function App() {
               <span aria-hidden="true">{termName}</span>
               <Icon name="chevron" size={12} />
             </label>
-            {major && (
+            {(inPlan || major) && (
               <>
                 <Icon name="chevronRight" size={12} className="faint" />
-                <span className="crumb">{major.name}</span>
+                <span className="crumb">{inPlan ? 'Still needed' : major.name}</span>
               </>
             )}
           </nav>
@@ -257,8 +298,10 @@ export default function App() {
         <FilterBar
           filters={filters}
           onChange={setFilters}
-          major={major}
+          major={inPlan ? null : major}
           onClearMajor={() => setMajorId('')}
+          view={inPlan ? 'Still needed' : null}
+          onClearView={() => setPlanView(false)}
           onClearAll={clearAll}
         />
 
@@ -283,6 +326,7 @@ export default function App() {
                   course={c}
                   watched={watched.includes(c.code)}
                   focused={focused === c.code}
+                  status={courseStatus(audit, c.code)}
                   onToggleWatch={toggleWatch}
                 />
               ))}
@@ -306,6 +350,8 @@ export default function App() {
           )}
         </div>
       </main>
+
+      {importOpen && <AuditImport onSave={saveAudit} onClose={() => setImportOpen(false)} />}
 
       {paletteOpen && (
         <CommandPalette

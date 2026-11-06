@@ -79,7 +79,7 @@ function SectionRow({ section }) {
   )
 }
 
-export default function CourseGroup({ course, index = 0, watched, focused, onToggleWatch }) {
+export default function CourseGroup({ course, index = 0, watched, focused, status, onToggleWatch }) {
   const [collapsed, setCollapsed] = useState(false)
   const [expanded, setExpanded] = useState(false)
   const shown = expanded ? course.sections : course.sections.slice(0, COLLAPSED)
@@ -108,6 +108,7 @@ export default function CourseGroup({ course, index = 0, watched, focused, onTog
         {course.tag && (
           <span className={`label ${course.tag.kind}`}><i />{course.tag.label}</span>
         )}
+        {status && <span className={`status ${status.kind}`}>{status.label}</span>}
         <span className="credits">{formatCredits(course.credits)}</span>
         <span className="count">{course.sections.length}</span>
         <span className="spacer" />

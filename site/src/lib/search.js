@@ -85,6 +85,7 @@ export function majorTagger(major, core, kinds) {
 
 function tagRank(tag) {
   if (!tag) return [9, 9]
+  if (tag.kind === 'needed') return [0, tag.order]  // Degree Works order
   const year = YEAR_ORDER.indexOf(tag.year)
   return [KIND_ORDER[tag.kind], year === -1 ? 8 : year]
 }
