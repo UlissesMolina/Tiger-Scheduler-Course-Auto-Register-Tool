@@ -29,6 +29,15 @@ class Config:
         "EMAIL_NOTIFICATIONS_ENABLED", "false"
     ).lower() == "true"
 
+    # Alert-only seat watcher (watch.py)
+    WATCH_CRNS = [c.strip() for c in os.getenv("WATCH_CRNS", "").split(",") if c.strip()]
+    WATCH_MIN_MINUTES = float(os.getenv("WATCH_MIN_MINUTES", "5"))
+    WATCH_MAX_MINUTES = float(os.getenv("WATCH_MAX_MINUTES", "15"))
+    QUIET_HOURS = os.getenv("QUIET_HOURS", "23-7")
+    WATCH_UNTIL = os.getenv("WATCH_UNTIL", "")
+    NTFY_TOPIC = os.getenv("NTFY_TOPIC", "")
+    NTFY_SERVER = os.getenv("NTFY_SERVER", "https://ntfy.sh")
+
     # Browser settings
     HEADLESS = os.getenv("HEADLESS", "false").lower() == "true"
 

@@ -11,7 +11,7 @@ on:
       - 'data/**'
       - '.github/workflows/pages.yml'
   workflow_run:
-    workflows: ['Seats snapshot']
+    workflows: ['Seats snapshot', 'Majors snapshot']
     types: [completed]
     branches: [main]
   workflow_dispatch:
