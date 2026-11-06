@@ -1,0 +1,65 @@
+name: Seats snapshot
+
+# Snapshots every section of Auburn's open terms (seats, waitlists, instructors,
+# meeting times) from the public Banner class search and commits the JSON.
+# 11:20 UTC is early morning in Auburn and off the top of the hour, so the run
+# avoids both registration traffic and GitHub's busiest scheduling window.
+on:
+  schedule:
+    - cron: '20 11 * * *'
+  workflow_dispatch:
+    inputs:
+      term:
+        description: '6-digit term code for a one-off run (e.g. 202720), blank for every open term'
+        required: false
+        default: ''
+      force:
+        description: 'Write even when a term comes back far smaller than what is committed'
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: seats
+  cancel-in-progress: false
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      # Standard library only; nothing to install.
+      - name: Fetch sections
+        env:
+          TERM_INPUT: ${{ inputs.term }}
+          FORCE_WRITE: ${{ inputs.force && '1' || '' }}
+        run: python scripts/fetch_sections.py $TERM_INPUT
+
+      # The fetch exits non-zero when it skipped or refused a term, but the terms
+      # it did snapshot are already on disk, so commit them before the job goes
+      # red. !cancelled() is success or failure.
+      - name: Commit if changed
+        if: ${{ !cancelled() }}
+        run: |
+          git add -A -- data/terms.json 'data/sections-*.json'
+          if git diff --cached --quiet; then
+            echo "No section file changed, nothing to commit."
+            exit 0
+          fi
+          git diff --cached --stat
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Update seat counts"
+          # A manual dispatch can overlap the schedule, and the branch may have
+          # moved on while the fetch was running.
+          git pull --rebase origin ${{ github.ref_name }}
+          git push origin HEAD:${{ github.ref_name }}
