@@ -61,13 +61,13 @@ function SectionRow({ section }) {
   )
 }
 
-export default function CourseCard({ course, watched, onToggleWatch }) {
+export default function CourseCard({ course, index = 0, watched, onToggleWatch }) {
   const [expanded, setExpanded] = useState(false)
   const shown = expanded ? course.sections : course.sections.slice(0, COLLAPSED)
   const hidden = course.sections.length - shown.length
 
   return (
-    <article className="course">
+    <article className="course" style={{ '--i': Math.min(index, 8) }}>
       <header>
         <div>
           <h2>
