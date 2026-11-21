@@ -4,12 +4,12 @@
       "code": "202720",
       "description": "Spring 2027",
       "file": "sections-202720.json",
-      "count": 7416,
-      "fetchedAt": "2026-11-20T19:08:52Z"
+      "count": 7419,
+      "fetchedAt": "2026-11-21T18:00:44Z"
     },
     {
       "code": "202710",
-      "description": "Fall 2026",
+      "description": "Fall 2026 (View Only)",
       "file": "sections-202710.json",
       "count": 7137,
       "fetchedAt": "2026-11-20T19:09:51Z"
